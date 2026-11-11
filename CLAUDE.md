@@ -6,6 +6,8 @@ Read this whole file at the start of every session. It is the agreed plan, writt
 
 The user has abandoned the US 500 idea. The project is now an **AI-assisted, long-only stock picker**: the assistant (Claude) reads company filings, earnings releases and news and makes the fundamental call, fixed technical rules confirm it, and only stocks that qualify are bought, with exits by stop, risk-to-reward target or a technical signal. The US 500 code, its tests and its results stay in the repo as a record and are parked. The user's own words on the role of the rules above: they are a starting point, not a constraint. The full design and its tests are pre-registered in the section "Pre-registration: AI-assisted long-only stock picker" below. Live trading of shares needs an order flow for shares that does not exist yet, and the user's explicit go.
 
+Update, later on 2026-11-11: the earnings-based candidates tested flat after costs and the technical confirmation hurt them (Test A below). The current candidate is **insider-buying clusters**, pre-registered in the section after that. Five ideas or variants have now been tried on this project, so the evidence bar for the insider test is raised from z of 2 to 2.5.
+
 ## What this project is
 
 A UK retail trader (the user) wants to trade **swing positions (days to weeks)** on **IG spread bets** (tax free in the UK), using their own **fundamental and news-driven judgement plus technical analysis**. The software does NOT decide what to trade. It does the safety-critical and repetitive work around the user's decisions.
@@ -176,6 +178,46 @@ Descriptive re-costing of the same holdout trades, NOT a new test and no new run
 **What is not claimed.** That an AI can pick stocks (it is not shown). That a backtest of the assistant's reading is possible without lookahead (it is not). The filing text does not contain the market's expectations or the call, and on two backlog examples (CVS fell 12.5% after a 25% EPS beat and a raised guide, Booking rose 9.8% after a weak guide) the release alone pointed the wrong way about the reaction. Whether the reading adds anything to the drift after the reaction is the open question.
 
 **Rules for what happens next.** No threshold, universe, rule or exit is changed after seeing a result. Any change needs a new pre-registration with the number of variants tried stated. Live trading needs the user's explicit go, an order flow for shares (not built), and starts at the minimum stake. Everything is journalled before outcomes are known.
+
+### Result of Test A, the mechanical half (run once on 2026-11-11, nothing changed)
+
+2,428 earnings reactions of +2% or more, 2005 to 2026, costs scenario D. Market-adjusted gross 20-session return, SE clustered by quarter.
+
+| | Events | Mean | z |
+|---|---|---|---|
+| Confirmed (trend and not stretched) | 510 | -0.17% | -0.62 |
+| Unconfirmed | 1,918 | +0.83% | +5.06 |
+| Holdout, confirmed minus unconfirmed | | -1.12% | -2.18 |
+
+Pre-registered readings: Reading 1, the confirmation **hurts** (holdout z -2.18). Reading 2, the mechanical half is **not** worth building on alone (holdout confirmed net +0.90%, z +1.39, under 2). Traded net per trade: confirmed +0.47% (z +1.11), unconfirmed +0.63% (z +2.23). Likely reason (an inference, untested): "not stretched" removes exactly the big reactions where the drift is, because a big positive reaction is stretched by definition. Pace: only about 24 confirmed candidates a year, under the pre-registered 40 a year, so the forward test as designed would be too slow. This was the third look at the same earnings dataset, so no historical holdout from it is clean. The earnings-based forward watch (`ig_swing/earnings_watch.py`) is built and parked.
+
+## Pre-registration: insider-buying clusters (written 2026-11-11, BEFORE any of it is built or run)
+
+**Why this idea.** The earnings and technical ideas are crowded and tested flat after costs. Clustered open-market insider purchases are, in the secondary sources I found (Insider Monkey, Interactive Brokers Campus, summaries of Lakonishok and Lee, Jeng, Metrick and Zeckhauser, Alldredge and Blank), the best-supported public signal: roughly 2.1% abnormal return in the following month for purchases within two days of another insider's, essentially nothing for routine trades, stronger in small stocks in one study and not significantly different by size in another. None of this is verified from the originals, and the effect may have weakened. It fits the long-only design, is niche, and is testable on history without the assistant's judgement.
+
+**Evidence gathered before writing (2026-11-11).** The SEC publishes every insider transaction in bulk, free, quarterly, back to at least 2007 (`.../insider-transactions-data-sets/{yyyy}q{n}_form345.zip`, with transaction code, filing date, issuer, owner and owner role). About 316 distinct clusters in 2024 Q1 and 394 in 2007 Q1 under the rough definition below, so roughly 1,300 to 1,600 a year. **Survivorship:** Yahoo returned no prices for 8 of 10 well-known failed or delisted companies (SIVB, LEHMQ, WAMUQ, CIT, FRC, RAD, JCP, SHLDQ), and for two more (BBBY, SBNY) the ticker now belongs to a different company. So a historical test with free data is survivor-biased, worst exactly where this idea lives (insiders buying distressed small caps), and ticker reuse can silently give the wrong company. **IG costs observed from IG's platform** (user screenshots): about 0.46% to 0.58% spread for mid and small caps (Veradermics, Verallia, Vera Therapeutics, Verastem, Vera Bradley, Cerence, Veracyte), 0.24% for the larger Veralto, **4.8% for the micro-cap Wrap Technologies** (untradeable), and Veradigm is phone-dealing only. Financing for a long was about 6.2% a year on Nvidia; for small caps it was not observed.
+
+**Event definition (fixed).**
+- Source: Form 4 only (not 4/A), non-derivative transactions with code P (open-market purchase), value (shares times price) of at least $10,000 per transaction, reporting owner a director or an officer.
+- Cluster: at least 2 distinct reporting owners whose qualifying Form 4 filing dates fall within 7 calendar days of the window's first filing, with at least $100,000 in total. The signal date is the filing date on which the cluster condition first becomes true. After a cluster, the same issuer is skipped for 30 days.
+- Entry: the open of the first session strictly after the signal filing date. The bulk data has no filing time, so this is deliberately conservative.
+- Events from 2007-01-01. Before 2017 is in-sample, 2017 onwards is the holdout.
+
+**Tradability filter (fixed, a stand-in for IG's spread).** A price of at least $5 and a 20-session average dollar volume of at least $5 million before the signal, to exclude names like Wrap. It is a stand-in: IG's historical spreads are unknown, and it will be checked against the spreads recorded in the forward test.
+
+**Price data guards.** Map the issuer's trading symbol to Yahoo, and require a price history of at least 250 sessions before the signal and a bar on the entry date. This catches reused tickers. Events without usable prices are counted as unpriced, by year.
+
+**Costs (fixed).** Spread 0.55% round trip (the observed small and mid cap range), financing 6.2% a year (observed on a large cap, assumed here), no currency fee (observed).
+
+**Historical test (an UPPER BOUND only).** Run once. Primary measure: the market-adjusted gross return from the entry open to the close of the 40th session, minus IWM (the Russell 2000 ETF) over the same dates, because the buyers skew small and mid cap. SE clustered by calendar quarter (insider buying spikes after market crashes, so events cluster in time). Secondary, not used for conclusions: 20 and 120 sessions, and SPY as the benchmark. Also reported: the traded variant (stop at 2 x ATR(14), 3R target, 40-session time exit, stop checked before target, gaps at the open, no technical exit) in R and in percent net of the fixed costs; coverage of priced against unpriced events by year; results excluding Q4 2008 to Q2 2009 and Q1 to Q2 2020; and the **break-even missing-event return**, the average return the unpriced events would need to have had to bring the pooled mean to zero. Reading: the bar is a clustered z of 2.5 or more (raised because five ideas or variants have been tried). **Failing even this upper bound ends the idea:** a holdout primary z under 2.5, or a holdout traded net expectancy of zero or less, is conclusive. **Passing is not evidence of an edge**: it only justifies the forward test.
+
+**Forward test (the real test).** Build a daily scan of new Form 4 filings (EDGAR's daily index, parsing each filing's XML; not yet built or verified) that applies the same cluster definition and the same tradability filter, plus a live IG lookup per signal: is the stock offered online, and what are its bid and offer at detection. Anything IG does not offer online, or with a spread over 0.6%, is recorded as untradeable, counted, and left out of the traded measure. The assistant reads each tradable cluster and records a structured assessment BEFORE the outcome is known: direction, confidence, who bought (roles), first purchase in a long time or not, size against holdings and against market cap, any footnote on the reason (plan, offering, financing), distress context, a thesis (at most 300 characters), what would invalidate it (at most 200) and what the assistant cannot see (at most 200). Events found after their entry open are backlog: kept, never read, not counted. Measured after the 40-session horizon with the actual recorded spread, financing as assumed, the same exits, benchmark IWM, with n and a clustered SE every time. Interim numbers are descriptive only and change nothing.
+
+**Decision rules.** Live money is considered only if at least 100 tradable forward clusters have finished AND their net expectancy after the recorded spread and financing is positive with a clustered z of 2.5 or more. The assistant's reading is used live only if the read-bullish group beats the rest by a clustered z of 2.5 or more; otherwise the mechanical rule alone is the candidate, if it passes. Fewer than 100 finished tradable clusters is no conclusion.
+
+**What is not claimed.** That the effect exists today (the literature is older and I read it second-hand). That a free-data backtest can be unbiased (it cannot). That the stand-in filter equals IG's real spread. That the assistant's reading adds anything.
+
+**Rules for what happens next.** No cluster definition, threshold, filter, horizon or cost is changed after seeing results; any change needs a new pre-registration with the variant count stated. Live trading needs the user's explicit go, an order flow for shares (not built), the AGREED risk profile (0.5 to 1% per trade, 3 open positions, 2% total) and the minimum stake first. Everything is journalled before outcomes are known.
 
 ## Why swing trading (decided, do not reopen)
 
