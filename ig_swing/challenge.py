@@ -251,6 +251,45 @@ def format_briefing(now: datetime, rows: list[dict], equity: float, positions: i
     return "\n".join(lines)
 
 
+MARKET_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "EUR/USD": ("euro", "ecb", "eur", "dollar", "fed", "lagarde", "eurozone"),
+    "GBP/USD": ("pound", "sterling", "bank of england", "boe", "bailey", "gilt", "uk ", "britain"),
+    "USD/JPY": ("yen", "boj", "japan", "dollar", "fed", "treasury yield"),
+    "AUD/USD": ("aussie", "australia", "rba", "china", "dollar", "iron ore"),
+    "Gold": ("gold", "bullion", "dollar", "fed", "yield", "safe haven", "inflation"),
+    "Crude oil": ("oil", "crude", "opec", "iran", "brent", "wti", "energy", "sanction"),
+    "US Tech 100": ("nasdaq", "tech", "nvidia", "chip", " ai ", "apple", "microsoft", "fed", "earnings"),
+    "US 500": ("s&p", "wall street", "stocks", "stock market", "fed", "earnings", "dow"),
+    "Germany 40": ("dax", "germany", "ecb", "euro", "europe", "german"),
+}
+MACRO_WORDS = ("fed", "fomc", "cpi", "inflation", "jobs", "payroll", "tariff", "rate", "recession", "war", "strike", "sanction")
+
+
+def relevant_headlines(headlines: list, market: str, limit: int = 6) -> list:
+    """Headlines that mention the market's own keywords first, then broad macro ones. Newest first within each group."""
+    own = tuple(k.lower() for k in MARKET_KEYWORDS.get(market, ()))
+    hit, macro = [], []
+    for h in headlines:
+        t = f" {h.title.lower()} "
+        if any(k in t for k in own):
+            hit.append(h)
+        elif any(k in t for k in MACRO_WORDS):
+            macro.append(h)
+    return (hit + macro)[:limit]
+
+
+def format_events(events: list, limit: int = 8) -> list[str]:
+    from .events import HIGH, MEDIUM
+
+    out = []
+    for e in events:
+        if e.tier not in (HIGH, MEDIUM):
+            continue
+        when = f"{e.time_utc:%a %d %b %H:%M}Z" if getattr(e, "time_utc", None) else f"{e.day:%a %d %b} (time n/a)"
+        out.append(f"  {when}  {e.label} [{e.tier.upper()}]")
+    return out[:limit]
+
+
 def format_quick(name: str, snap: dict, atr_pts: float, hourly: pd.DataFrame | None, long_pct: float | None, range20: tuple[float, float] | None, positions: int) -> str:
     """A compact read on one market, for when the user sees a sudden move and wants to know if there is a trade."""
     price = snap["price"]
@@ -355,6 +394,24 @@ def main(argv: list[str] | None = None) -> int:
             info = {"price": price, "pct_change": snap.pct_change or 0.0, "net_change": snap.net_change or 0.0, "spread_pct": (snap.offer - snap.bid) / price * 100}
             print(format_quick(args.market, info, float(atr(bars, 14).iloc[-1]), hourly, long_pct,
                                (float(bars["low"].tail(20).min()), float(bars["high"].tail(20).max())), len(client.get_positions())))
+            import requests
+
+            from .config import optional_key
+            from .events import load_events
+            from .news import load_headlines
+
+            session = requests.Session()
+            events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
+            heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 40)
+            print("  Events, next 48 hours: " + ("" if format_events(events) else "none found"))
+            for line in format_events(events):
+                print(line)
+            rel = relevant_headlines(heads, args.market)
+            print("  Headlines that mention this market or the macro backdrop (last 12 hours):" + ("" if rel else " none found"))
+            for h in rel:
+                print(f"    {h.published:%H:%M} {h.title}")
+            for n in ev_notes + hd_notes:
+                print(f"  note: {n}")
             return 0
         if args.cmd == "report":
             get_bars = lambda m: clean_daily(client.get_prices(MARKETS[m][0], "DAY", 60), now)
@@ -377,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
                 pass
         events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
         heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 10)
-        ev_text = [f"  {e.day:%a %d %b} {e.label} [{e.tier}]" for e in events if e.tier in ("HIGH", "MEDIUM")][:8]
+        ev_text = format_events(events)
         hd_text = [f"  {h.published:%H:%M} {h.title}" for h in heads]
         print(format_briefing(now, rows, acct.equity, len(client.get_positions()), notes + ev_notes + hd_notes, ev_text, hd_text))
         limits = risk_limits(env)

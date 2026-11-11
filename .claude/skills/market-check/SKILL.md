@@ -8,9 +8,11 @@ description: Use when the user says "market check", "check the markets", "any tr
 Read the section "The £45 play-money challenge" in CLAUDE.md first. Those rules decide everything below. Nothing here is a proven edge: say so, plainly, every time.
 
 ## 1. Get the data (read-only)
-- The user named a market or a move ("gold just dropped", "Nasdaq is falling"): run `python3 -m ig_swing.challenge quick --market "<market>"`. Markets: EUR/USD, GBP/USD, USD/JPY, AUD/USD, Gold, Crude oil, US Tech 100, US 500, Germany 40.
+- The user named a market or a move ("gold just dropped", "Nasdaq is falling"): run `python3 -m ig_swing.challenge quick --market "<market>"`. Markets: EUR/USD, GBP/USD, USD/JPY, AUD/USD, Gold, Crude oil, US Tech 100, US 500, Germany 40. It prints the price and move in daily ranges, the last 24 hours, the 20-day range, IG client positioning, open positions, the next 48 hours of calendar events and the headlines that mention that market or the macro backdrop.
 - No market named, or a market-wide move: run `python3 -m ig_swing.challenge brief` (about 30 API calls). **Run it once per session.** IG rate-limits the API key: if you see `exceeded-api-key-allowance`, stop, tell the user, and do not retry in a loop.
 - A drop in one market: also run the quick read on two or three related ones (for example US 500 and Nasdaq together, gold with the dollar pairs) instead of the full briefing.
+
+What the data does and does not cover, so you do not overclaim: the calendar is US releases (BLS and FRED dates, the Fed's meeting dates) with times only where BLS gives them, and no forecasts or consensus numbers; there is no UK or euro-area calendar and no earnings calendar here. Headlines are titles only from the free RSS feeds and Finnhub. IG client positioning comes from IG's own sentiment feed. If the cause of a move is not in this data, use WebSearch to look for it, and say plainly when you still cannot find one.
 
 ## 2. Read it like an analyst
 - How big is the move in daily ranges (ATR)? Over two is unusual. Is it market-wide or one market?

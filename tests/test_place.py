@@ -130,3 +130,25 @@ def test_quick_read_describes_the_move_in_daily_ranges():
         assert needle in text
     calm = ch.format_quick("EUR/USD", {**info, "net_change": -20.0, "pct_change": -0.2}, 70.0, None, None, (11000.0, 11200.0), 1)
     assert "over two daily ranges" not in calm and "n/a" in calm and "% of the way up" in calm
+
+
+def test_relevant_headlines_put_the_markets_own_news_first_then_macro():
+    from datetime import datetime, timezone
+    from ig_swing.news import Headline
+    now = datetime(2026, 11, 11, 20, 0, tzinfo=timezone.utc)
+    hs = [Headline("Fed minutes point to slower cuts", now, "a"), Headline("Oil slides as Iran strikes seen unlikely", now, "b"),
+          Headline("Celebrity chef opens new restaurant", now, "c"), Headline("OPEC+ weighs output cut", now, "d"),
+          Headline("Tariff talks resume with Mexico", now, "e")]
+    out = ch.relevant_headlines(hs, "Crude oil", limit=10)
+    assert [h.source for h in out] == ["b", "d", "a", "e"]                      # oil and OPEC first, then macro (Fed, tariff), never the chef
+    assert ch.relevant_headlines(hs, "Crude oil", limit=2) == out[:2] and ch.relevant_headlines([], "Gold") == []
+    assert ch.relevant_headlines(hs, "Not a market") != [] and all(k in ch.MARKET_KEYWORDS for k in ch.MARKETS)
+
+
+def test_events_are_listed_with_times_when_known_and_only_high_or_medium():
+    from datetime import date, datetime, timezone
+    from ig_swing.events import Event
+    ev = [Event(date(2026, 11, 13), "Producer Price Index (PPI)", "high", "BLS", datetime(2026, 11, 13, 13, 30, tzinfo=timezone.utc)),
+          Event(date(2026, 11, 12), "Weekly jobless claims", "medium", "FRED", None), Event(date(2026, 11, 12), "Minor thing", "low", "FRED", None)]
+    lines = ch.format_events(ev)
+    assert len(lines) == 2 and "Fri 13 Nov 13:30Z" in lines[0] and "PPI" in lines[0] and "(time n/a)" in lines[1] and all("Minor" not in l for l in lines)
