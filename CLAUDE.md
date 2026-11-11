@@ -8,6 +8,8 @@ The user has abandoned the US 500 idea. The project is now an **AI-assisted, lon
 
 Update, later on 2026-11-11: the earnings-based candidates tested flat after costs and the technical confirmation hurt them (Test A below). The current candidate is **insider-buying clusters**, pre-registered in the section after that. Five ideas or variants have now been tried on this project, so the evidence bar for the insider test is raised from z of 2 to 2.5.
 
+**Current plan (2026-11-11, agreed with the user): a hands-off core plus cushion portfolio on IG futures. The one-page spec is `PORTFOLIO_SPEC.md`.** It is to be paper-tracked first. The trend overlay alone failed the user's 4% bar; the combination is descriptive and in-sample only.
+
 **User instruction, repeated several times (2026-11-11): trade FUTURES, not daily funded bets.** Quarterly contracts rolled each quarter, wider spread, **no overnight financing charge**. Cost any strategy as the observed futures spread plus one spread per roll while in the position, with no financing line. Daily-bet history from IG is only a price proxy for the futures. The trend sleeve test charged 2.5% a year financing because its history is daily bets; its verdict (fails the 4% bar) holds with zero financing, see its result section. Cash not used as margin can earn interest outside IG.
 
 ## What this project is
