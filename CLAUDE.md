@@ -111,6 +111,28 @@ Background: the US 500 technical test showed no edge (see above) and the user is
 - What happens next: no parameter (threshold, hold, stop, universe, split) is changed after seeing results. One run only. Any variant needs a new pre-registration with the number of variants tried stated.
 - Limits: survivorship bias (current large caps only, so results are an upper bound), cost scenarios are assumptions, positions are not capped (this is per-trade expectancy and not an account simulation), the EDGAR acceptance time can lag the press release, news-reading by the assistant is not part of this test.
 
+### Result of the post-earnings drift test (run once on 2026-11-11, nothing changed)
+
+Data: 97 of the 99 stocks (BK and WBA are missing from EDGAR's current ticker list), 8,351 earnings filings, 1,937 triggered events from 2005-01-20 to 2026-10-13. Skipped: 5,832 below the 5% threshold, 395 filed during the session, 99 without enough data.
+
+PRIMARY, market-adjusted gross return per trade over 20 sessions, SE clustered by calendar quarter:
+
+| Subset | Events | Mean | SE | z | Reading |
+|---|---|---|---|---|---|
+| All | 1,937 | +0.72% | 0.21% | +3.48 | supports continuation |
+| In-sample (before 2017) | 847 | +0.72% | 0.33% | +2.19 | supports |
+| Holdout (2017 on) | 1,090 | +0.72% | 0.26% | +2.72 | supports |
+| Long only | 1,024 | +1.21% | 0.24% | +5.00 | supports |
+| Short only | 913 | +0.16% | 0.30% | +0.54 | within noise |
+
+By year the effect is positive in 18 of 22 years (negative in 2005, 2008, 2022, 2026), with no sign of fading by decade.
+
+TRADED variant (2 x ATR stop, 20 sessions, unhedged), holdout, mean per trade: gross +0.49% (SE 0.25%); scenario B (spread 0.10% plus financing) +0.12% (SE 0.24%), or **+0.02R (SE 0.04R)**; scenario C (B plus a 0.8% currency fee) -0.68%, or **-0.12R**. Gross holdout expectancy +0.09R (SE 0.04). The average stop is 6.5% of price and the median hold 27 calendar days. About 88 triggered events a year across the universe.
+
+Reading, against the pre-registered rules: the primary test passes (holdout z +2.72), and the secondary criterion is met on paper (holdout scenario B mean is positive), but **+0.12% with a standard error of 0.24% is indistinguishable from zero**, and if the 0.8% currency fee applies the strategy loses money. The gross effect is real in this data. Whether it survives costs is not shown.
+
+Why the gross result should be discounted: (1) **survivorship and hindsight bias.** The universe is today's large caps, chosen because they succeeded, and the effect sits almost entirely in the long side (+1.21% against +0.16% for shorts), which is the pattern that bias would produce. The true effect is probably smaller and cannot be measured with free data. (2) The cost scenarios are assumptions from IG's pages. (3) Positions were not capped and the trades overlap in time. Not tested: whether reading the release text adds anything.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
