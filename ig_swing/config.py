@@ -63,6 +63,12 @@ def _load_dotenv() -> None:
         pass
 
 
+def optional_key(name: str) -> str | None:
+    """A non-IG API key from the environment or .env, or None if unset."""
+    _load_dotenv()
+    return os.environ.get(name) or None
+
+
 def ig_env() -> str:
     """'demo' (default) or 'live'. Anything else is an error, never a guess."""
     _load_dotenv()
