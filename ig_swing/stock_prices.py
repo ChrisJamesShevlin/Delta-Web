@@ -34,6 +34,8 @@ def parse_chart(payload: dict) -> pd.DataFrame:
         "timestamp": pd.to_datetime(result["timestamp"], unit="s").normalize(),
         "open": q["open"], "high": q["high"], "low": q["low"], "close": q["close"], "volume": q["volume"],
     })
+    # The quoted close is split-adjusted but not dividend-adjusted: it is the one to compare with volume and a price floor.
+    df["raw_close"] = df["close"]
     if adj is not None:
         factor = pd.Series(adj, dtype="float64") / df["close"]
         for c in ("open", "high", "low"):
@@ -41,7 +43,7 @@ def parse_chart(payload: dict) -> pd.DataFrame:
         df["close"] = pd.Series(adj, dtype="float64")
     df = df.dropna(subset=["open", "high", "low", "close"])
     df = df[(df["high"] >= df["low"]) & (df["close"] > 0)]
-    return df.drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)[COLUMNS]
+    return df.drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)[COLUMNS + ["raw_close"]]
 
 
 def fetch_prices(session: Any, symbol: str, start: date = START, end: date | None = None) -> pd.DataFrame:
