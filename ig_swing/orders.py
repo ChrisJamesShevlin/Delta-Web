@@ -84,6 +84,7 @@ class OrderService:
             f"  risk £{decision.risk_gbp:.2f} ({decision.risk_pct:.1f}% of £{account.equity:.2f}), setup {setup}, env {self.env}\n"
             f"  quote {rules.bid}/{rules.offer}"
             + "".join(f"\n  context: {n}" for n in context.notes)
+            + "".join(f"\n  note: {n}" for n in decision.notes)
         )
         if not self.confirm(text):
             self.journal.record_event(ts, "declined", f"{direction} {epic} declined at confirmation")

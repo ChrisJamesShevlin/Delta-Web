@@ -118,6 +118,11 @@ class Journal:
             row = c.execute("SELECT equity FROM equity_daily WHERE day<=? ORDER BY day DESC LIMIT 1", (day,)).fetchone()
             return None if row is None else float(row["equity"])
 
+    def peak_equity(self) -> float | None:
+        with self._conn() as c:
+            row = c.execute("SELECT MAX(equity) AS m FROM equity_daily").fetchone()
+            return float(row["m"]) if row and row["m"] is not None else None
+
     def closed_trades(self) -> list[dict[str, Any]]:
         with self._conn() as c:
             return [dict(r) for r in c.execute("SELECT * FROM trades WHERE closed_at IS NOT NULL ORDER BY closed_at, id")]

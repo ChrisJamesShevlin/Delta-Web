@@ -105,7 +105,7 @@ def test_measure_and_report_state_sample_size_and_the_cap():
     m = ch.measure(ideas, lambda market: b[market])
     assert m["total"] == 2 and len(m["finished"]) == 2
     text = ch.format_report(m)
-    for needle in ("n=2", "playbook news_thesis", "Probability check", "Kelly cap", "held at 10%", "under 30: noise"):
+    for needle in ("n=2", "playbook news_thesis", "Probability check", "Kelly cap", "held at 5%", "under 30: noise"):
         assert needle in text
 
 
@@ -131,5 +131,5 @@ def test_briefing_text_contains_the_pieces():
 
 
 def test_constants():
-    assert ch.KELLY_FRACTION == 0.125 and ch.CAP_UNTIL_CALIBRATED == 10.0 and ch.CAP_CALIBRATED == 20.0 and ch.CALIBRATION_MIN == 30
+    assert ch.KELLY_FRACTION == 0.125 and ch.CAP_UNTIL_CALIBRATED == 5.0 and ch.CAP_CALIBRATED == 10.0 and ch.CALIBRATION_MIN == 30
     assert len(ch.MARKETS) == 9

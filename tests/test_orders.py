@@ -413,3 +413,24 @@ def test_cooldown_blocks_entries_after_two_losses_in_a_row_and_expires(tmp_path)
     c2 = FakeClient()
     s2 = OrderService(c2, RiskEngine(CHALLENGE, KillSwitch(tmp_path / "ks2.json")), j, lambda t: True, env="live")
     assert s2._cooldown_veto(NOW + timedelta(hours=32)) is None
+
+
+def test_drawdown_brake_halves_the_stake_when_equity_is_far_below_its_peak(tmp_path):
+    from ig_swing.config import CHALLENGE
+    from ig_swing.risk import EntryProposal
+    engine = RiskEngine(CHALLENGE, KillSwitch(tmp_path / "ks.json"))
+    prop = EntryProposal(EPIC, "BUY", 50.0, 0.01, 1.0)
+    normal = engine.evaluate_entry(prop, AccountState(40.0, 40.0, 40.0, peak_equity=45.0), [], [], NOW)        # 11% below the peak
+    braked = engine.evaluate_entry(prop, AccountState(30.0, 30.0, 30.0, peak_equity=45.0), [], [], NOW)        # 33% below the peak
+    assert normal.allowed and braked.allowed and normal.notes == () and any("drawdown brake" in n for n in braked.notes)
+    ref = engine.evaluate_entry(prop, AccountState(30.0, 30.0, 30.0, peak_equity=30.0), [], [], NOW)           # no drawdown at the same equity
+    assert braked.size == pytest.approx(ref.size / 2, abs=0.0101) and braked.size < ref.size
+    assert engine.evaluate_entry(prop, AccountState(30.0, 30.0, 30.0), [], [], NOW).notes == ()                  # no peak known: no brake
+
+
+def test_journal_reports_the_peak_equity(tmp_path):
+    j = Journal(tmp_path / "j.db")
+    assert j.peak_equity() is None
+    for day, eq in (("2026-11-09", 45.0), ("2026-11-10", 52.5), ("2026-11-11", 47.0)):
+        j.record_equity(day, eq, "live")
+    assert j.peak_equity() == 52.5

@@ -31,6 +31,8 @@ class RiskLimits:
     min_equity_gbp: float = 0.0            # new entries refused below this equity (0 = no floor)
     cooldown_losses: int = 0               # this many losing trades in a row ...
     cooldown_hours: float = 0.0            # ... blocks new entries for this long after the last one closed
+    drawdown_brake_pct: float = 0.0        # when equity is this far below its peak, stakes are scaled down ...
+    drawdown_brake_factor: float = 0.5     # ... by this factor (0 pct = no brake)
 
 
 AGREED = RiskLimits()
@@ -53,15 +55,17 @@ LIVE_TEST = RiskLimits(
 # rules: a floor at £15 equity, two positions at most, and a 24 hour cooldown after two losses in a row.
 CHALLENGE = RiskLimits(
     name="challenge",
-    risk_per_trade_pct=10.0,
-    max_risk_per_trade_pct=20.0,
+    risk_per_trade_pct=10.0,               # the ceiling: the Kelly tool scales below it (5% until calibrated)
+    max_risk_per_trade_pct=10.0,           # lowered from 20% by the user's staking decision on 2026-11-11
     daily_loss_limit_pct=25.0,
     weekly_loss_limit_pct=40.0,
     max_open_positions=2,
-    max_total_open_risk_pct=30.0,
+    max_total_open_risk_pct=20.0,
     min_equity_gbp=15.0,
     cooldown_losses=2,
     cooldown_hours=24.0,
+    drawdown_brake_pct=25.0,
+    drawdown_brake_factor=0.5,
 )
 
 

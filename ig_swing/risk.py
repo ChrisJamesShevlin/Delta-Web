@@ -185,6 +185,7 @@ class AccountState:
     equity: float
     start_of_day_equity: float
     start_of_week_equity: float
+    peak_equity: float | None = None       # highest equity on record, for the drawdown brake
 
 
 def check_loss_limits(account: AccountState, limits: RiskLimits) -> list[str]:
@@ -289,6 +290,7 @@ class Decision:
     risk_gbp: float
     risk_pct: float
     reasons: tuple[str, ...]
+    notes: tuple[str, ...] = ()            # information on an allowed entry, for example that the drawdown brake is on
 
 
 class RiskEngine:
@@ -341,6 +343,11 @@ class RiskEngine:
 
         reasons += [f"context veto: {v}" for v in proposal.vetoes]
         factor = proposal.size_factor if 0 < proposal.size_factor <= 1 else 1.0  # context may only shrink size
+        notes: list[str] = []
+        lim = self.limits
+        if lim.drawdown_brake_pct and account.peak_equity and account.equity <= account.peak_equity * (1 - lim.drawdown_brake_pct / 100):
+            factor *= lim.drawdown_brake_factor
+            notes.append(f"drawdown brake on: equity £{account.equity:.2f} is {lim.drawdown_brake_pct:g}% or more below its peak of £{account.peak_equity:.2f}, stake scaled by {lim.drawdown_brake_factor:g}")
         size = size_position(account.equity, proposal.stop_distance, self.limits, proposal.min_deal_size,
                              risk_pct=self.limits.risk_per_trade_pct * factor)
         if not size.allowed:
@@ -357,4 +364,4 @@ class RiskEngine:
             reasons.append(f"event blackout: {e.label}, {when}")
 
         ok = not reasons
-        return Decision(ok, size.size if ok else 0.0, size.risk_gbp if ok else 0.0, size.risk_pct if ok else 0.0, tuple(reasons))
+        return Decision(ok, size.size if ok else 0.0, size.risk_gbp if ok else 0.0, size.risk_pct if ok else 0.0, tuple(reasons), tuple(notes) if ok else ())

@@ -46,8 +46,8 @@ PLAYBOOKS = ("event_reaction", "news_thesis", "earnings", "trend", "sentiment", 
 CONFIDENCES = ("LOW", "MEDIUM", "HIGH")
 COST_R = 0.05                       # assumed cost of a trade in multiples of the risk
 KELLY_FRACTION = 0.125            # the user's choice: an eighth of Kelly guards against my probabilities being a few points too high
-CAP_UNTIL_CALIBRATED = 10.0         # percent of the bankroll at risk per trade
-CAP_CALIBRATED = 20.0
+CAP_UNTIL_CALIBRATED = 5.0          # percent of the bankroll at risk per trade (lowered from 10 by the user's staking decision, 2026-11-11)
+CAP_CALIBRATED = 10.0
 CALIBRATION_MIN = 30
 CALIBRATION_TOLERANCE = 0.10
 MAX_THESIS = 300
@@ -251,6 +251,26 @@ def format_briefing(now: datetime, rows: list[dict], equity: float, positions: i
     return "\n".join(lines)
 
 
+def format_quick(name: str, snap: dict, atr_pts: float, hourly: pd.DataFrame | None, long_pct: float | None, range20: tuple[float, float] | None, positions: int) -> str:
+    """A compact read on one market, for when the user sees a sudden move and wants to know if there is a trade."""
+    price = snap["price"]
+    move_atr = snap["net_change"] / atr_pts if atr_pts else float("nan")
+    lines = [f"{name}: {price:.1f} ({snap['pct_change']:+.2f}% today, {snap['net_change']:+.1f} points = {move_atr:+.1f} x the 14-day average daily range of {atr_pts:.1f}), "
+             f"spread {snap['spread_pct']:.3f}%"]
+    if abs(move_atr) >= 2:
+        lines.append("  The move is over two daily ranges: unusual. Check for news before fading or following it.")
+    if hourly is not None and len(hourly):
+        hi, lo, last = float(hourly["high"].max()), float(hourly["low"].min()), float(hourly["close"].iloc[-1])
+        lines.append(f"  last {len(hourly)} hours: high {hi:.1f}, low {lo:.1f}, now {last:.1f} ({(last - hi) / hi * 100:+.2f}% from the high, {(last - lo) / lo * 100:+.2f}% from the low)")
+    if range20:
+        lines.append(f"  20-day range {range20[0]:.1f} to {range20[1]:.1f}; price is "
+                     + ("below the range (breakdown)" if price < range20[0] else "above the range (breakout)" if price > range20[1] else
+                        f"{(price - range20[0]) / (range20[1] - range20[0]) * 100:.0f}% of the way up it"))
+    lines.append("  IG clients: " + ("n/a" if long_pct is None else f"{long_pct:.0f}% long, {100 - long_pct:.0f}% short"))
+    lines.append(f"  open positions: {positions}")
+    return "\n".join(lines)
+
+
 def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.DataFrame, datetime], pd.DataFrame]) -> tuple[list[dict], list[str]]:
     from .indicators import atr
     rows, notes = [], []
@@ -274,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ig_swing.challenge")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("brief")
+    q = sub.add_parser("quick", help="a fast read on one market, for a sudden move")
+    q.add_argument("--market", required=True, choices=list(MARKETS))
     sub.add_parser("report")
     i = sub.add_parser("idea")
     i.add_argument("--market", required=True, choices=list(MARKETS))
@@ -313,6 +335,26 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Recorded idea {n}: {direction} {args.market} at {entry}, stop {args.stop:g}, target {args.target:g} (reward to risk {rr:.1f}), p_win {args.p_win:.0%}")
             print(f"  full Kelly {ks * 100:.1f}% of the bankroll, 1/8 Kelly {100 * KELLY_FRACTION * ks:.1f}%; suggested risk {suggested_risk_pct(args.p_win, rr):.1f}% (cap {CAP_UNTIL_CALIBRATED:.0f}% until calibrated)"
                   + ("" if ks > 0 else "  -> Kelly says do not trade this"))
+            return 0
+        if args.cmd == "quick":
+            from .indicators import atr
+            epic, sent_id, _ = MARKETS[args.market]
+            snap = client.get_snapshot(epic)
+            bars = clean_daily(client.get_prices(epic, "DAY", 30), now)
+            try:
+                hourly = client.get_prices(epic, "HOUR", 24)
+            except Exception:
+                hourly = None
+            long_pct = None
+            try:
+                s_ = client._call("GET", "/clientsentiment", "1", params={"marketIds": sent_id}, context="client sentiment")
+                long_pct = float(s_["clientSentiments"][0]["longPositionPercentage"])
+            except Exception:
+                pass
+            price = (snap.bid + snap.offer) / 2
+            info = {"price": price, "pct_change": snap.pct_change or 0.0, "net_change": snap.net_change or 0.0, "spread_pct": (snap.offer - snap.bid) / price * 100}
+            print(format_quick(args.market, info, float(atr(bars, 14).iloc[-1]), hourly, long_pct,
+                               (float(bars["low"].tail(20).min()), float(bars["high"].tail(20).max())), len(client.get_positions())))
             return 0
         if args.cmd == "report":
             get_bars = lambda m: clean_daily(client.get_prices(MARKETS[m][0], "DAY", 60), now)
