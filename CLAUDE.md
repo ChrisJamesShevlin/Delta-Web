@@ -59,6 +59,20 @@ After run 1 was reported, I found that IG stamps bars by UTC date, so the roughl
 
 Run 2 is the same test on the cleaned file (1,252 bars, 2022-01-19 to 2026-11-10): same `FIXED` settings, same 70/30 split, same reading rules, nothing tuned. Honest disclosure: the data fix was prompted after seeing run 1 (it was found by checking the data, not chosen for its effect on the result), and run 2 is the second look at this data. **Two runs have been made. Run 2 supersedes run 1 for conclusions. No further runs, and no parameter changes, are allowed on this data without a new pre-registration.**
 
+### Result of run 2 (cleaned data, 2026-11-11). This supersedes run 1.
+
+1,252 clean daily bars, 2022-01-19 to 2026-11-10. Settings unchanged, nothing tuned.
+
+| Subset | Trades | Expectancy (R) | SE | Win rate | Max drawdown |
+|---|---|---|---|---|---|
+| All | 86 | +0.03 | 0.14 | 31% | 3.9% |
+| In-sample (to 2025-06-02) | 58 | +0.09 | 0.18 | 34% | 3.9% |
+| Holdout | 28 | -0.09 | 0.22 | 25% | 3.8% |
+| Long only | 58 | +0.13 | 0.17 | 34% | 2.7% |
+| Short only | 28 | -0.18 | 0.24 | 25% | 4.1% |
+
+Reading, against the pre-registered rules: n=86 is under the 100-trade minimum, so no conclusion, and the expectancy (+0.03R, SE 0.14) is indistinguishable from zero. In-sample and holdout **disagree in sign** (+0.09 then -0.09). Exits: 34 stops, 24 targets, 26 trend breaks, 1 time, 1 end of data. Run 1 had said +0.11R on 102 trades: the cleaning moved the point estimate by 0.08R, about half a standard error, which is itself an illustration of how much noise a sample this size carries. Conclusion: no evidence of a technical edge, and the data cannot rule one out either.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
