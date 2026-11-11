@@ -257,6 +257,27 @@ Facts found when the monthly data was pulled (data availability only, no results
 3. **One clearly labelled sensitivity run, not the verdict:** V2 with the FRED-based 10-year proxy added as a rates market (cost of the US 10-year ETF bet, doubled as everywhere). **It cannot change the verdict.** If the primary fails and the sensitivity run passes, that is reported and the user decides whether a new pre-registration is worth writing; the user's rule remains that missing a bar ends this version.
 No threshold, bar, variant or cost is changed.
 
+### Result of the trend sleeve test (run once on 2026-11-11, nothing changed): FAILS the user's bars. This version is ended.
+
+IG monthly prices, 14 markets (eleven from December 2001; silver from 2010, copper from 2015; the US 10-year ETF bet only from July 2025), sleeve returns 2002-12 to 2026-10 (287 months). Costs: spread doubled, financing 2.5% a year on gross notional.
+
+| | V2 (primary) | V1 (comparison) |
+|---|---|---|
+| Net return a year | +1.32% | +1.21% |
+| Volatility | 10.3% | 10.5% |
+| Worst monthly drawdown | -41.8% | -38.2% |
+| Longest time under water | 139 months | 139 months |
+| To 2009 / 2010 to 2019 / 2020 on | +7.85% / **-4.05%** / +2.86% | +4.47% / -0.91% / +1.02% |
+| 2008 / 2015 / 2022 | +39.5% / -16.6% / -1.7% | +18.8% / +6.8% / +3.7% |
+| Bar 1: worst rolling 10-year window, share at or above 4% | -4.93%, 8% (**FAILS**) | -3.80%, 1% (FAILS) |
+| Bar 2: worst drawdown with the sleeve added (static -37.0%, return +7.47%) | -28.7%, +9.09% (passes) | -21.5%, +8.76% (passes) |
+
+**Verdict under the pre-registered rule: bar 1 fails, so we stop and the money stays in the ISA.** The sensitivity run with a FRED-based rates leg did no better (net +0.15% a year, worst 10-year window -5.58%) and could not have changed the verdict anyway.
+
+Descriptive decomposition of the same primary run (not a new test): the failure does not depend on the financing assumption. Before financing the sleeve made +4.43% a year but still -1.09% a year in 2010 to 2019, with a worst 10-year window of -1.70% and 36% of windows at or above 4%. Before all costs it made +4.70% a year, -0.81% a year in the 2010s, worst window -1.35%, 38% of windows at or above 4%. So the user's feared "decade of nothing" showed up in the 2010s even with no costs at all. What did hold: it earned strongly in 2008 (+39.5%) and since 2020, and it passed the diversification bar (shallower drawdown and a higher return when added to a 70/30 static mix), but a diversifier that earns nothing for ten years was ruled out by the user in advance.
+
+Limits that apply to this result: monthly bars understate drawdowns, daily bets omit the carry of quarterly futures, the rates leg is missing from IG history and the proxy did not help, historical spreads are unknown, and about two independent decades means no significance is claimed. No parameter was changed.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
