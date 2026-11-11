@@ -27,6 +27,18 @@ The user decided that technical analysis alone has no edge, that the plan in thi
 - Unchanged hard limits: mandatory stop, `user_confirmed` on every order and close, size and loss limits, event blackout, live order placement disabled in code until the user says go.
 - Honest limit: we cannot beat professionals on speed. Free feeds lag and the view is read when a session asks. The hypothesis is consistency and breadth, not speed, and it is unproven. Every plan archives what the context layer saw (`news_snapshot` events) so it can be tested.
 
+## Pre-registration: technical backtest (written 2026-11-11, BEFORE any history was pulled or any result seen)
+
+Question: does the technical engine alone (no news layer) earn a positive expectancy after the spread?
+
+- Data: IG `IX.D.SPTRD.DAILY.IP` daily bars (mid of bid and ask), requested 1,500 bars via `python3 -m ig_swing.history`, using whatever IG returns. Cached to `data/history/US500_DAY.csv`.
+- Test: `python3 -m ig_swing.technical_test`, one run with the settings in `FIXED` in `ig_swing/technical_test.py`: default `StrategyParams` (EMA 20/50, ATR 14, stop 1.5 ATR, target 2R, 20-day breakout, pullback 0.5 ATR, RSI 60/40, 80-bar warm-up), spread 1.0 point, `AGREED` profile, start equity 100,000, backtester defaults for the rest (next-open entry paying half the spread, stop checked before target, gaps filled at the open, trend-break exit, 40-bar time stop, one position at a time).
+- Split: the whole series is run once, trades are split by entry date: the first 70% of bars is in-sample, the last 30% is the holdout.
+- Reported: n, expectancy per trade in R with standard error, win rate, max drawdown, for all trades, in-sample, holdout, long only and short only.
+- Reading it: fewer than 100 trades is no conclusion. An expectancy within 2 standard errors of zero is indistinguishable from no edge. If in-sample and holdout disagree in sign, say so. A clearly negative result counts as evidence against the rules.
+- Rules for what happens next: no parameter is changed after seeing results. Any tuning uses the in-sample part only and is then judged once on the holdout, and the number of variants tried must be stated. A result that needs tuning to look good is treated as noise.
+- Not modelled: financing, loss limits, the news and cross-asset layers, slippage beyond overnight gaps.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
