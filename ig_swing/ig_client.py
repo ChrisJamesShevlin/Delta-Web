@@ -118,6 +118,21 @@ class MarketSummary:
     offer: float | None
 
 
+@dataclass(frozen=True)
+class Snapshot:
+    """Current quote and today's change from the market lookup. No allowance cost."""
+
+    epic: str
+    status: str
+    bid: float | None
+    offer: float | None
+    net_change: float | None
+    pct_change: float | None
+    high: float | None
+    low: float | None
+    update_time: str | None
+
+
 class PriceCache:
     """Small on-disk cache so repeat runs do not burn the price allowance."""
 
@@ -303,6 +318,24 @@ class IGClient:
             min_stop_distance=min_stop,
             bid=bid,
             offer=offer,
+        )
+
+    def get_snapshot(self, epic: str) -> Snapshot:
+        """Current price and today's change. Read-only, uses no price allowance."""
+        data = self._call("GET", f"/markets/{epic}", "3", context="snapshot")
+        snap = data.get("snapshot")
+        if not isinstance(snap, dict):
+            raise MarketDataError("Market response has no snapshot")
+        return Snapshot(
+            epic=epic,
+            status=str(snap.get("marketStatus", "")),
+            bid=_num(snap.get("bid")),
+            offer=_num(snap.get("offer")),
+            net_change=_num(snap.get("netChange")),
+            pct_change=_num(snap.get("percentageChange")),
+            high=_num(snap.get("high")),
+            low=_num(snap.get("low")),
+            update_time=snap.get("updateTime"),
         )
 
     def search_markets(self, term: str) -> list[MarketSummary]:

@@ -39,9 +39,10 @@ KEYWORDS = (
     "bailey", "sanction",
 )
 # Whole words (plus an optional plural), so "fed" does not match "federation".
+# A leading hyphen also blocks a match, so "trillion-dollar" is not "dollar".
 # "geopolit" is a stem on purpose: geopolitics, geopolitical.
 _KEYWORD_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(k) for k in KEYWORDS) + r")s?\b|\bgeopolit\w*", re.I
+    r"(?<![-\w])(?:" + "|".join(re.escape(k) for k in KEYWORDS) + r")s?\b|(?<![-\w])geopolit\w*", re.I
 )
 
 

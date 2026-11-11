@@ -12,8 +12,10 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from .config import optional_key
+from .config import base_url, ig_env, load_credentials, optional_key
 from .events import HIGH, MEDIUM, Event, load_events
+from .ig_client import IGClient
+from .inputs import CrossAssetInput, load_inputs
 from .news import Headline, load_headlines
 
 UK = ZoneInfo("Europe/London")
@@ -28,10 +30,24 @@ def _when(e: Event) -> str:
     return f"{e.day:%a %d %b} (time n/a)"
 
 
-def format_briefing(now_utc: datetime, events: list[Event], headlines: list[Headline], notes: list[str], days: int = DAYS_AHEAD) -> str:
+def format_briefing(
+    now_utc: datetime,
+    events: list[Event],
+    headlines: list[Headline],
+    notes: list[str],
+    days: int = DAYS_AHEAD,
+    inputs: list[CrossAssetInput] | None = None,
+) -> str:
     today = now_utc.astimezone(UK).date()
     horizon = today + timedelta(days=days)
     lines = [f"IG-Swing briefing, {now_utc.astimezone(UK):%a %d %b %Y %H:%M} UK", ""]
+
+    if inputs:
+        lines.append("Cross-asset today (IG prices)")
+        for i in inputs:
+            pct = "n/a" if i.pct_change is None else f"{i.pct_change:+.2f}%"
+            lines.append(f"  {i.name:16} {pct:>8}  {i.direction or 'n/a':5}  [{i.status}]")
+        lines.append("")
 
     upcoming = [e for e in events if today <= e.day <= horizon]
     for tier, title in ((HIGH, "High impact"), (MEDIUM, "Medium impact")):
@@ -60,8 +76,19 @@ def main() -> int:
     session = requests.Session()
     events, event_notes = load_events(session, now.date(), now.date() + timedelta(days=DAYS_AHEAD), optional_key("FRED_API_KEY"))
     headlines, news_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, LOOKBACK_HOURS)
-    print(format_briefing(now, events, headlines, event_notes + news_notes))
+    inputs, input_notes = _load_ig_inputs()
+    print(format_briefing(now, events, headlines, input_notes + event_notes + news_notes, inputs=inputs))
     return 0
+
+
+def _load_ig_inputs() -> tuple[list[CrossAssetInput], list[str]]:
+    """Read-only IG snapshots. Skipped, with a note, if IG cannot be reached."""
+    try:
+        env = ig_env()
+        client = IGClient(load_credentials(env), base_url=base_url(env), allow_live=(env == "live"))
+        return load_inputs(client)
+    except Exception as exc:  # type name only: messages can carry sensitive detail
+        return [], [f"Cross-asset inputs: unavailable ({type(exc).__name__})"]
 
 
 if __name__ == "__main__":

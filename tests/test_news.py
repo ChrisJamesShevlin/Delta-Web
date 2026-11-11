@@ -70,6 +70,9 @@ def test_select_sorts_newest_first_and_caps():
 def test_keyword_match_is_not_fooled_by_substrings_in_the_middle():
     assert select_headlines([h("The federation of cooks meets", 13)], NOW) == []
     assert len(select_headlines([h("Federal Reserve holds rates", 13)], NOW)) == 1
+    assert select_headlines([h("Corporate America makes a trillion-dollar mistake", 13)], NOW) == []
+    assert len(select_headlines([h("Dollar slides as Fed signals pause", 13)], NOW)) == 1
+    assert len(select_headlines([h("Geopolitical risk lifts gold", 13)], NOW)) == 1
 
 
 def test_finnhub_parse_and_http_error():
