@@ -50,8 +50,11 @@ LOOKBACKS = (1, 3, 12)
 WINDOW = 120
 RETURN_BAR = 0.04
 PRIMARY = "V2"
-STATIC_WEIGHTS = {"US 500": 0.7, "US 10Y Treasury ETF": 0.3}
+STATIC_WEIGHTS = {"US 500": 0.7, "bond": 0.3}
 CACHE_DIR = Path("data/history/trend")
+BOND_DURATION = 8.0                      # modified duration used for the FRED-based 10-year proxy
+BOND_NAME = "US 10Y (FRED proxy)"
+FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
 
 FIXED: dict[str, Any] = dict(vol_target=VOL_TARGET, vol_window=(VOL_MIN, VOL_WINDOW), leverage=(LEV_MIN, LEV_MAX), spread_mult=SPREAD_MULT,
                              financing=FINANCING, lookbacks=LOOKBACKS, window=WINDOW, return_bar=RETURN_BAR, primary=PRIMARY)
@@ -114,6 +117,50 @@ def load_panel(cache: Path = CACHE_DIR) -> pd.DataFrame:
     return build_panel(frames)
 
 
+def bond_returns_from_yields(yields: pd.Series) -> pd.Series:
+    """Monthly return proxy for a 10-year Treasury from month-end yields in percent: carry less duration times the change.
+
+    return_t = y_{t-1} / 12 - D x (y_t - y_{t-1}), with D = BOND_DURATION. Convexity is ignored.
+    """
+    y = yields.astype(float) / 100.0
+    return (y.shift(1) / 12 - BOND_DURATION * (y - y.shift(1))).dropna()
+
+
+def fetch_yields(session: Any, api_key: str, start: str = "2001-01-01") -> pd.Series:
+    resp = session.get(FRED_URL, params={"series_id": "DGS10", "api_key": api_key, "file_type": "json", "sort_order": "asc",
+                                         "observation_start": start, "limit": 100000}, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"HTTP {resp.status_code}")
+    rows = {}
+    for o in resp.json().get("observations", []):
+        try:
+            rows[pd.Timestamp(o["date"])] = float(o["value"])
+        except (KeyError, ValueError, TypeError):
+            continue
+    daily = pd.Series(rows).sort_index()
+    return daily.groupby(daily.index.to_period("M")).last()
+
+
+def load_bond_proxy(cache: Path = CACHE_DIR) -> pd.Series:
+    """Monthly 10-year Treasury return proxy from FRED (cached). Needs FRED_API_KEY the first time."""
+    path = cache / "fred_DGS10_monthly.csv"
+    if path.exists():
+        y = pd.read_csv(path, index_col=0)["yield"]
+        y.index = pd.PeriodIndex(y.index, freq="M")
+    else:
+        import requests
+
+        from .config import optional_key
+
+        key = optional_key("FRED_API_KEY")
+        if not key:
+            raise RuntimeError("FRED_API_KEY is not set")
+        y = fetch_yields(requests.Session(), key)
+        cache.mkdir(parents=True, exist_ok=True)
+        y.rename("yield").to_frame().to_csv(path)
+    return bond_returns_from_yields(y)
+
+
 # ---- the strategy: signals, sizes, leverage, portfolio ---------------------
 
 
@@ -169,13 +216,13 @@ def portfolio(W: pd.DataFrame, returns: pd.DataFrame, spreads: pd.Series, mult: 
     return out[started.cummax()] if started.any() else out.iloc[0:0]
 
 
-def run_sleeve(panel: pd.DataFrame, variant: str) -> dict[str, Any]:
+def run_sleeve(panel: pd.DataFrame, variant: str, extra_spreads: dict[str, float] | None = None) -> dict[str, Any]:
     returns = panel.pct_change(fill_method=None)
     sig = signals(panel, variant)
     raw = raw_weights(sig, returns)
     lev = leverage(held_returns(raw, returns))
     W = raw.mul(lev, axis=0)
-    spreads = pd.Series({n: m["spread"] for n, m in MARKETS.items()})
+    spreads = pd.Series({n: m["spread"] for n, m in MARKETS.items()} | (extra_spreads or {}))
     pf = portfolio(W, returns, spreads)
     return {"variant": variant, "returns": returns, "weights": W, "leverage": lev, "pf": pf}
 
@@ -211,10 +258,10 @@ def bar1(r: pd.Series) -> dict[str, Any]:
     return {"windows": len(w), "worst": float(w.min()), "worst_end": w.idxmin(), "share": float((w >= RETURN_BAR).mean()), "passes": bool((w >= RETURN_BAR).all())}
 
 
-def static_mix(returns: pd.DataFrame) -> pd.Series:
-    cols = list(STATIC_WEIGHTS)
-    both = returns[cols].dropna()
-    return sum(returns.loc[both.index, c] * w for c, w in STATIC_WEIGHTS.items())
+def static_mix(returns: pd.DataFrame, bond: pd.Series) -> pd.Series:
+    """70% US 500 and 30% bond proxy, monthly, price returns for shares (no income). Months where either leg is missing are skipped."""
+    both = pd.concat([returns["US 500"], bond.rename("bond")], axis=1).dropna()
+    return both["US 500"] * STATIC_WEIGHTS["US 500"] + both["bond"] * STATIC_WEIGHTS["bond"]
 
 
 def bar2(sleeve: pd.Series, static: pd.Series) -> dict[str, Any]:
@@ -245,7 +292,7 @@ def summary(res: dict[str, Any]) -> dict[str, Any]:
             "turnover": float(pf["turnover"].mean() * 12), "bar1": bar1(net)}
 
 
-def format_report(results: dict[str, dict[str, Any]], panel: pd.DataFrame) -> str:
+def format_report(results: dict[str, dict[str, Any]], panel: pd.DataFrame, bond: pd.Series, sensitivity: dict[str, Any] | None = None) -> str:
     pct = lambda v: "n/a" if v is None or v != v else f"{v * 100:+.2f}%"
     first = {c: panel[c].first_valid_index() for c in panel.columns}
     lines = [f"Trend sleeve on IG monthly prices: {panel.index.min()} to {panel.index.max()} ({len(panel)} months), {panel.shape[1]} markets",
@@ -265,11 +312,22 @@ def format_report(results: dict[str, dict[str, Any]], panel: pd.DataFrame) -> st
                   "  calendar years: " + ", ".join(f"{y} {pct(v)}" for y, v in s["years"].items() if y in (2008, 2011, 2015, 2018, 2020, 2022)),
                   f"  Bar 1: {s['bar1']['windows']} rolling {WINDOW}-month windows, worst {pct(s['bar1']['worst'])}, share at or above {RETURN_BAR:.0%}: "
                   f"{s['bar1']['share'] * 100:.0f}% -> " + ("passes" if s["bar1"]["passes"] else "FAILS")]
-        static = static_mix(res["returns"])
+        static = static_mix(res["returns"], bond)
         b2 = bar2(res["pf"]["net"], static)
         lines += [f"  Bar 2 over {b2['months']} months: static mix worst drawdown {pct(b2['static_dd'])}, return {pct(b2['static_ret'])} a year; "
                   f"with the sleeve added {pct(b2['combined_dd'])}, {pct(b2['combined_ret'])} -> " + ("passes" if b2["passes"] else "FAILS"), ""]
         verdict_parts[variant] = (s["bar1"]["passes"], b2["passes"])
+    if sensitivity is not None:
+        s2 = summary(sensitivity)
+        b2s = bar2(sensitivity["pf"]["net"], static_mix(sensitivity["returns"], bond))
+        lines += ["SENSITIVITY, NOT THE VERDICT: V2 with a synthetic FRED-based 10-year bond market added as a rates leg (cost of the US 10-year ETF bet, x2)",
+                  f"  net return {pct(s2['ann'])} a year, volatility {pct(s2['vol'])}, worst monthly drawdown {pct(s2['dd'])}, longest time under water {s2['under']} months, "
+                  f"correlation with the US 500 {s2['corr']:+.2f}",
+                  "  by period: " + ", ".join(f"{k} {pct(v[0])} ({v[1]} months)" for k, v in s2["periods"].items()),
+                  "  calendar years: " + ", ".join(f"{y} {pct(v)}" for y, v in s2["years"].items() if y in (2008, 2011, 2015, 2018, 2020, 2022)),
+                  f"  Bar 1: worst rolling {WINDOW}-month window {pct(s2['bar1']['worst'])}, share at or above {RETURN_BAR:.0%}: {s2['bar1']['share'] * 100:.0f}% -> "
+                  + ("passes" if s2["bar1"]["passes"] else "FAILS") + f"; Bar 2: " + ("passes" if b2s["passes"] else "FAILS"),
+                  "  This cannot change the verdict. If the primary fails and this passes, we say so and the user decides whether a new pre-registration is worth writing.", ""]
     p1, p2 = verdict_parts[PRIMARY]
     lines.append(f"VERDICT on the primary ({PRIMARY}): bar 1 {'passes' if p1 else 'FAILS'}, bar 2 {'passes' if p2 else 'FAILS'} -> "
                  + ("PASSES both bars: the next step is paper-tracking on IG's live prices, not real money." if p1 and p2 else
@@ -289,7 +347,12 @@ def main(argv: list[str] | None = None) -> int:
     if panel.empty or panel.shape[1] < len(MARKETS):
         print(f"FAILED: only {panel.shape[1] if not panel.empty else 0} of {len(MARKETS)} markets cached (run with --fetch first)")
         return 1
-    print(format_report({v: run_sleeve(panel, v) for v in ("V1", "V2")}, panel))
+    bond = load_bond_proxy()
+    results = {v: run_sleeve(panel, v) for v in ("V1", "V2")}
+    synth = (1 + bond).cumprod().rename(BOND_NAME)
+    synth_panel = panel.join(synth.reindex(panel.index))
+    sens = run_sleeve(synth_panel, "V2", {BOND_NAME: MARKETS["US 10Y Treasury ETF"]["spread"]})
+    print(format_report(results, panel, bond, sens))
     return 0
 
 

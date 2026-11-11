@@ -154,15 +154,39 @@ def test_bar_two_wants_a_shallower_drawdown_and_no_lower_return():
 
 def test_static_mix_is_seventy_thirty_and_ignores_months_either_leg_is_missing():
     idx = months(3)
-    returns = pd.DataFrame({"US 500": [0.10, np.nan, 0.0], "US 10Y Treasury ETF": [0.0, 0.05, 0.10]}, index=idx)
-    m = ts.static_mix(returns)
+    returns = pd.DataFrame({"US 500": [0.10, np.nan, 0.0]}, index=idx)
+    bond = pd.Series([0.0, 0.05, 0.10], index=idx)
+    m = ts.static_mix(returns, bond)
     assert list(m.index) == [idx[0], idx[2]] and m.iloc[0] == pytest.approx(0.07) and m.iloc[1] == pytest.approx(0.03)
+
+
+def test_bond_proxy_is_carry_less_duration_times_the_yield_change():
+    y = pd.Series([4.0, 5.0, 4.0], index=months(3))
+    r = ts.bond_returns_from_yields(y)
+    assert len(r) == 2
+    assert r.iloc[0] == pytest.approx(0.04 / 12 - 8.0 * 0.01)                    # yields up 1 point: a loss
+    assert r.iloc[1] == pytest.approx(0.05 / 12 + 8.0 * 0.01)                    # yields down 1 point: a gain
+
+
+def test_fred_yields_are_taken_at_month_end_and_missing_values_skipped():
+    class Resp:
+        status_code = 200
+        def json(self):
+            return {"observations": [{"date": "2020-01-02", "value": "1.5"}, {"date": "2020-01-31", "value": "1.6"},
+                                     {"date": "2020-02-03", "value": "."}, {"date": "2020-02-28", "value": "1.2"}]}
+
+    class S:
+        def get(self, *a, **k):
+            return Resp()
+
+    y = ts.fetch_yields(S(), "k")
+    assert list(y.index.astype(str)) == ["2020-01", "2020-02"] and list(y) == [1.6, 1.2]
 
 
 def test_pre_registered_constants():
     assert len(ts.MARKETS) == 14 and ts.BARS == 300 and ts.PRIMARY == "V2"
     assert (ts.VOL_TARGET, ts.LEV_MIN, ts.LEV_MAX, ts.SPREAD_MULT, ts.FINANCING, ts.WINDOW, ts.RETURN_BAR) == (0.10, 1.0, 3.0, 2.0, 0.025, 120, 0.04)
-    assert ts.LOOKBACKS == (1, 3, 12) and (ts.VOL_MIN, ts.VOL_WINDOW) == (12, 36) and ts.STATIC_WEIGHTS == {"US 500": 0.7, "US 10Y Treasury ETF": 0.3}
+    assert ts.LOOKBACKS == (1, 3, 12) and (ts.VOL_MIN, ts.VOL_WINDOW) == (12, 36) and ts.STATIC_WEIGHTS == {"US 500": 0.7, "bond": 0.3} and ts.BOND_DURATION == 8.0
     assert ts.MARKETS["Copper"]["spread"] == 0.00218 and ts.MARKETS["US 10Y Treasury ETF"]["spread"] == 0.003475
     assert len({m["epic"] for m in ts.MARKETS.values()}) == 14
 
@@ -171,6 +195,8 @@ def test_report_states_both_bars_and_a_verdict():
     rng = np.random.default_rng(3)
     names = list(ts.MARKETS)
     p = panel_of({n: list(100 * np.cumprod(1 + rng.normal(0.004, 0.04, 200))) for n in names})
-    text = ts.format_report({v: ts.run_sleeve(p, v) for v in ("V1", "V2")}, p)
-    for needle in ("PRIMARY", "comparison only", "Bar 1", "Bar 2", "VERDICT", "monthly bars understate"):
+    bond = pd.Series(rng.normal(0.003, 0.02, 200), index=p.index)
+    sens = ts.run_sleeve(p, "V2")
+    text = ts.format_report({v: ts.run_sleeve(p, v) for v in ("V1", "V2")}, p, bond, sens)
+    for needle in ("PRIMARY", "comparison only", "Bar 1", "Bar 2", "VERDICT", "monthly bars understate", "SENSITIVITY, NOT THE VERDICT"):
         assert needle in text

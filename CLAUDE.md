@@ -249,6 +249,14 @@ Missing either bar fails the idea and we stop. Nothing is adjusted afterwards to
 
 **If it passes.** The next step is paper-tracking on IG's live prices for a period before any real money, with the quarterly futures equivalents and an order flow that does not exist yet, and the user's explicit go. **If it fails,** we stop and the money stays in the ISA.
 
+### Amendment to the trend sleeve pre-registration (2026-11-11, written after the data pull and BEFORE the test was run or any return computed)
+
+Facts found when the monthly data was pulled (data availability only, no results): eleven markets have about 25 years (from December 2001: US 500, US Tech 100, Germany 40, Japan 225, EUR/USD, GBP/USD, USD/JPY, AUD/USD, gold, crude oil, natural gas, with EUR/USD missing one month); **silver starts August 2010, copper March 2015, and IG's US 10-year Treasury ETF bet only July 2025 (17 months)**. So the rates leg is effectively absent from IG's history. Changes made, because the plan cannot be carried out as written:
+1. **Static mix for bar 2.** The bond leg cannot come from IG. It is a proxy built from FRED's 10-year Treasury yield (`DGS10`, month-end): monthly return = prior yield / 12 minus 8.0 times the change in yield (modified duration 8.0, convexity ignored). The static mix stays 70% US 500 (price returns, no income) and 30% this proxy.
+2. **The primary test is unchanged.** V2 on the IG data as pre-registered. Markets join once they have 12 monthly returns, so silver, copper and the ETF join late and the rates leg is effectively missing for the primary run.
+3. **One clearly labelled sensitivity run, not the verdict:** V2 with the FRED-based 10-year proxy added as a rates market (cost of the US 10-year ETF bet, doubled as everywhere). **It cannot change the verdict.** If the primary fails and the sensitivity run passes, that is reported and the user decides whether a new pre-registration is worth writing; the user's rule remains that missing a bar ends this version.
+No threshold, bar, variant or cost is changed.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
