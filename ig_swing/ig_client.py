@@ -107,6 +107,17 @@ class Confirmation:
     stop_level: float | None
 
 
+@dataclass(frozen=True)
+class MarketSummary:
+    epic: str
+    name: str
+    expiry: str
+    instrument_type: str
+    status: str
+    bid: float | None
+    offer: float | None
+
+
 class PriceCache:
     """Small on-disk cache so repeat runs do not burn the price allowance."""
 
@@ -293,6 +304,26 @@ class IGClient:
             bid=bid,
             offer=offer,
         )
+
+    def search_markets(self, term: str) -> list[MarketSummary]:
+        """Read-only market search. Use it to find an epic."""
+        data = self._call("GET", "/markets", "1", params={"searchTerm": term}, context="market search")
+        out = []
+        for m in data.get("markets", []):
+            if not m.get("epic"):
+                continue
+            out.append(
+                MarketSummary(
+                    epic=str(m["epic"]),
+                    name=str(m.get("instrumentName", "")),
+                    expiry=str(m.get("expiry", "")),
+                    instrument_type=str(m.get("instrumentType", "")),
+                    status=str(m.get("marketStatus", "")),
+                    bid=_num(m.get("bid")),
+                    offer=_num(m.get("offer")),
+                )
+            )
+        return out
 
     def get_prices(self, epic: str, resolution: str = "DAY", num_points: int = 60) -> pd.DataFrame:
         """Fetch OHLC bars. Cached, and guarded by the historical price allowance."""

@@ -179,6 +179,22 @@ def test_relogin_once_on_invalid_token(tmp_path):
     assert s.paths().count(("POST", "/session")) == 2
 
 
+# ---- market search --------------------------------------------------------
+
+
+def test_search_markets_parses_results_and_skips_rows_without_epic(tmp_path):
+    body = {
+        "markets": [
+            {"epic": "IX.D.SPTRD.DEC.IP", "instrumentName": "US 500 (DEC-26)", "expiry": "DEC-26", "instrumentType": "INDICES", "marketStatus": "TRADEABLE", "bid": 7617.08, "offer": 7618.08},
+            {"instrumentName": "no epic here"},
+        ]
+    }
+    c, s = client({("GET", "/markets"): [FakeResponse(200, body)]}, tmp_path)
+    found = c.search_markets("US 500")
+    assert len(found) == 1 and found[0].expiry == "DEC-26" and found[0].offer - found[0].bid == pytest.approx(1.0)
+    assert all(call["method"] == "GET" for call in s.calls if call["path"] == "/markets")
+
+
 # ---- market rules ---------------------------------------------------------
 
 
