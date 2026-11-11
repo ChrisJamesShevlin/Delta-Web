@@ -347,7 +347,8 @@ def test_trailing_stop_scoring_by_hand_and_the_comparison_in_the_report():
     assert ch.score_idea_trail(i, bars([FLAT, FLAT])) is None
     m = ch.measure([i], lambda k: run_then_reverse)
     text = ch.format_report(m)
-    assert "Exit style comparison (the same ideas, n=1)" in text and "fixed stop and target mean +2.00R against a trailing stop from +1R mean +1.99R" in text
+    assert "Exit style comparison (the same ideas, n=1)" in text and "fixed stop and target mean +2.00R; trailing stop from +1R, 1R behind the best price +1.99R" in text
+    assert "1.5R behind the best price +1.49R" in text and "2R behind the best price -0.01R" in text and "three trail widths" in text
 
 
 def test_trailing_scoring_short_side_and_gaps():
@@ -357,3 +358,15 @@ def test_trailing_scoring_short_side_and_gaps():
     assert t["reason"] == "trail_stop" and t["exit"] == pytest.approx(10991.0) and t["r"] == pytest.approx(0.09)
     gap = ch.score_idea_trail(idea(horizon_days=3), bars([(10800.0, 10810.0, 10790.0, 10800.0)]))     # a long gaps through its stop
     assert gap["reason"] == "stop_gap" and gap["r"] < -1.0
+
+
+def test_wider_trails_hold_on_longer_and_give_back_more_or_less_by_hand():
+    i = idea(horizon_days=4)
+    b = bars([(11000.0, 11110.0, 10995.0, 11100.0), (11100.0, 11300.0, 11090.0, 11250.0), (11250.0, 11260.0, 11150.0, 11160.0), FLAT])
+    one = ch.score_idea_trail(i, b, 1.0)
+    one_half = ch.score_idea_trail(i, b, 1.5)
+    two = ch.score_idea_trail(i, b, 2.0)
+    assert one["exit"] == pytest.approx(11199.0)                         # best 11299, stop 1R behind
+    assert one_half["exit"] == pytest.approx(11149.0) and one_half["r"] == pytest.approx(1.49)       # best 11299, stop 1.5R behind: hit a bar later
+    assert two["reason"] == "trail_stop_gap" and two["exit"] == pytest.approx(10999.0)               # 2R behind stays out of the dip, then the flat open gaps through it
+    assert ch.TRAIL_WIDTHS == (1.0, 1.5, 2.0)

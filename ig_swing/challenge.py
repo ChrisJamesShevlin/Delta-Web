@@ -201,8 +201,8 @@ def score_idea(idea: dict, bars: pd.DataFrame) -> dict[str, Any] | None:
     return None
 
 
-def score_idea_trail(idea: dict, bars: pd.DataFrame) -> dict[str, Any] | None:
-    """The same idea with a trailing stop instead of a fixed stop and target: fixed stop until up 1R, then trailing 1R behind the best price.
+def score_idea_trail(idea: dict, bars: pd.DataFrame, width_r: float = 1.0) -> dict[str, Any] | None:
+    """The same idea with a trailing stop instead of a fixed stop and target: fixed stop until up 1R, then trailing ``width_r`` x R behind the best price.
 
     No take-profit, so a winner can run until the trail is hit or the horizon ends. Daily bars: the stop for a bar is the one set by the
     PREVIOUS bars (the trail is updated with a bar's extreme only after it), gaps fill at the open, a stop inside a bar fills at the stop.
@@ -214,6 +214,7 @@ def score_idea_trail(idea: dict, bars: pd.DataFrame) -> dict[str, Any] | None:
     entry, r = idea["entry"], idea["stop_pts"]
     stop = entry - r if buy else entry + r
     half = idea["spread_pts"] / 2
+    d = width_r * r
     best = entry
     trailing = False
     horizon = idea["horizon_days"]
@@ -228,7 +229,7 @@ def score_idea_trail(idea: dict, bars: pd.DataFrame) -> dict[str, Any] | None:
             best = max(best, h - half)
             trailing = trailing or best - entry >= r
             if trailing:
-                stop = max(stop, best - r)
+                stop = max(stop, best - d)
         else:
             if o + half >= stop:
                 return _result(idea, o + half, reason + "_gap")
@@ -237,7 +238,7 @@ def score_idea_trail(idea: dict, bars: pd.DataFrame) -> dict[str, Any] | None:
             best = min(best, lo + half)
             trailing = trailing or entry - best >= r
             if trailing:
-                stop = min(stop, best + r)
+                stop = min(stop, best + d)
         if j == horizon - 1:
             return _result(idea, c - half if buy else c + half, "time")
     return None
@@ -274,6 +275,9 @@ def calibration(finished: list[tuple[dict, dict]]) -> dict[str, Any]:
             "calibrated": n >= CALIBRATION_MIN and abs(pred - act) <= CALIBRATION_TOLERANCE}
 
 
+TRAIL_WIDTHS = (1.0, 1.5, 2.0)
+
+
 def measure(ideas: list[dict], get_bars: Callable[[str], pd.DataFrame]) -> dict[str, Any]:
     finished, pending, pairs = [], 0, []
     for idea in ideas:
@@ -283,9 +287,9 @@ def measure(ideas: list[dict], get_bars: Callable[[str], pd.DataFrame]) -> dict[
             pending += 1
         else:
             finished.append((idea, res))
-        trail = score_idea_trail(idea, bars)
-        if res is not None and trail is not None:
-            pairs.append((idea, res, trail))
+        trails = {w: score_idea_trail(idea, bars, w) for w in TRAIL_WIDTHS}
+        if res is not None and all(t is not None for t in trails.values()):
+            pairs.append((idea, res, trails))
     return {"finished": finished, "pending": pending, "total": len(ideas), "calibration": calibration(finished), "pairs": pairs}
 
 
@@ -309,9 +313,11 @@ def format_report(m: dict[str, Any]) -> str:
             lines.append(f"  taken live: n={len(live)}, mean {mean_se(live)[0]:+.2f}R")
     pairs = m.get("pairs") or []
     if pairs:
-        fx, tr = [r["r"] for _, r, _ in pairs], [t["r"] for _, _, t in pairs]
-        lines.append(f"Exit style comparison (the same ideas, n={len(pairs)}): fixed stop and target mean {mean_se(fx)[0]:+.2f}R against a trailing stop from +1R "
-                     f"mean {mean_se(tr)[0]:+.2f}R" + ("  (under 30: noise)" if len(pairs) < 30 else ""))
+        fx = mean_se([r["r"] for _, r, _ in pairs])[0]
+        tr = {w: mean_se([t[w]["r"] for _, _, t in pairs])[0] for w in TRAIL_WIDTHS}
+        lines.append(f"Exit style comparison (the same ideas, n={len(pairs)}): fixed stop and target mean {fx:+.2f}R; trailing stop from +1R, "
+                     + ", ".join(f"{w:g}R behind the best price {tr[w]:+.2f}R" for w in TRAIL_WIDTHS)
+                     + ("  (under 30: noise; three trail widths were tried, so small gaps are noise)" if len(pairs) < 30 else "  (three trail widths were tried, so small gaps are noise)"))
     cal = m["calibration"]
     lines.append("Probability check (does the stated chance of winning match what happened?)")
     if cal["n"]:
