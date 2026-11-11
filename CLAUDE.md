@@ -282,6 +282,10 @@ Descriptive decomposition of the same primary run (not a new test): the failure 
 
 Limits that apply to this result: monthly bars understate drawdowns, daily bets omit the carry of quarterly futures, the rates leg is missing from IG history and the proxy did not help, historical spreads are unknown, and about two independent decades means no significance is claimed. No parameter was changed.
 
+### Insider-buying cluster test: ABANDONED UNRUN by the user's decision (2026-11-11). No result, not a pass and not a fail.
+
+The user stopped the price fetch as a waste of time. State at the stop: the SEC bulk insider data was cached for 77 quarters (18,135 clusters under the fixed definition), and prices had been fetched for 4098 of 6348 symbols (65%), of which 1917 returned no price data. The historical test was never run, so the pre-registration above produced no evidence either way. The code (`ig_swing/insiders.py`, `ig_swing/insider_test.py`) and its tests stay in the repo, and the fetch is resumable (`python3 -m ig_swing.insider_test --fetch`) if the idea is ever revisited. One thing the partial fetch showed regardless: about half of the symbols that appear in insider clusters returned no price history from Yahoo, so free data cannot give an unbiased historical test of this idea.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
