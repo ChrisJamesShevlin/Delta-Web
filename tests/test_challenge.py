@@ -312,3 +312,15 @@ def test_ideas_can_be_for_any_market_and_are_scored_by_their_epic():
     seen = []
     ch.measure([i], lambda key: seen.append(key) or bars([FLAT]))
     assert seen == ["UB.D.UBER24.DAILY.IP"]                                                                 # bars are fetched by epic, not by a table name
+
+
+def test_keywords_match_whole_words_only():
+    from datetime import datetime, timezone
+    from ig_swing.news import Headline
+    now = datetime(2026, 11, 11, 20, 0, tzinfo=timezone.utc)
+    hs = [Headline("Stock Market Today: Rally on November 11; Oil Rises, Gold Slips - Eurasia Business News", now, "a"),
+          Headline("Crunch Fitness seeks $800 million from franchise-backed bonds", now, "b"),
+          Headline("Euro slips as ECB's Lagarde warns on growth", now, "c"), Headline("Swiss franc climbs as SNB holds rates", now, "d")]
+    assert [h.source for h in ch.relevant_headlines(hs, "EUR/USD", macro_padding=False)] == ["c"]            # not Eurasia
+    assert [h.source for h in ch.relevant_headlines(hs, "USD/CHF", macro_padding=False)] == ["d"]            # not franchise
+    assert ch._has_word("the euros are strong", "euro") and not ch._has_word("eurasia", "eur") and ch._has_word("tariffs rise", "tariff")

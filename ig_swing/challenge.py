@@ -357,15 +357,23 @@ MARKET_KEYWORDS: dict[str, tuple[str, ...]] = {
 MACRO_WORDS = ("fed", "fomc", "cpi", "inflation", "jobs", "payroll", "tariff", "rate", "recession", "war", "strike", "sanction")
 
 
+def _has_word(text: str, keyword: str) -> bool:
+    """Whole-word match (with an optional plural), so "eur" does not match "Eurasia" or "franc" "franchise"."""
+    k = keyword.strip().lower()
+    if not k:
+        return False
+    return re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?:s|es)?(?![a-z0-9])", text) is not None
+
+
 def relevant_headlines(headlines: list, market: str, limit: int = 6, macro_padding: bool = True) -> list:
-    """Headlines that mention the market's own keywords first, then broad macro ones. Newest first within each group."""
+    """Headlines that mention the market's own keywords first, then broad macro ones. Whole words only. Newest first within each group."""
     own = tuple(k.lower() for k in MARKET_KEYWORDS.get(market, ())) or tuple(w for w in re.split(r"[^a-z0-9&]+", market.lower()) if len(w) >= 4)
     hit, macro = [], []
     for h in headlines:
-        t = f" {h.title.lower()} "
-        if any(k in t for k in own):
+        t = h.title.lower()
+        if any(_has_word(t, k) for k in own):
             hit.append(h)
-        elif any(k in t for k in MACRO_WORDS):
+        elif any(_has_word(t, k) for k in MACRO_WORDS):
             macro.append(h)
     return (hit + (macro if macro_padding else []))[:limit]
 
