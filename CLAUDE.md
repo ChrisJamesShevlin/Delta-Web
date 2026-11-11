@@ -219,6 +219,36 @@ Pre-registered readings: Reading 1, the confirmation **hurts** (holdout z -2.18)
 
 **Rules for what happens next.** No cluster definition, threshold, filter, horizon or cost is changed after seeing results; any change needs a new pre-registration with the variant count stated. Live trading needs the user's explicit go, an order flow for shares (not built), the AGREED risk profile (0.5 to 1% per trade, 3 open positions, 2% total) and the minimum stake first. Everything is journalled before outcomes are known.
 
+## Pre-registration: multi-market trend sleeve on IG data (written 2026-11-11, BEFORE the data beyond a five-market depth probe was pulled or any result seen)
+
+**What it is.** A slow, long-and-short, diversified futures-style trend sleeve for the user: an additional tactical sleeve beside their ISA and poker, always invested in a handful of markets, rolled quarterly when traded live, hedge-fund style. It is the backup the user chose after the stock ideas tested flat. It is not swing trading. It trades once a month.
+
+**The user's bars (set by the user, 2026-11-11: "a decade of nothing is pointless, the money would be better in an ISA"; "4% is fine").**
+1. **Return bar:** the primary version's net return (after costs, excess over cash) is at least 4% a year over EVERY rolling 120-month window.
+2. **Sleeve bar:** the static mix plus the sleeve as an overlay must have a shallower worst drawdown than the static mix alone, with no lower return.
+Missing either bar fails the idea and we stop. Nothing is adjusted afterwards to make it pass.
+
+**Data.** IG monthly bars (the daily funded bet or ETF-based daily bet), 300 monthly bars requested per market (about 25 years, whatever IG returns), mid of bid and ask at the bar close, cached to `data/history/trend/`. Drop the current unfinished month. A missing month in a market excludes that market for the months it touches. Monthly bars hide moves within a month, so drawdowns are understated.
+
+**Universe (fixed, 14 markets, epic, observed round-trip spread on 2026-11-11).** Stock indices: US 500 `IX.D.SPTRD.DAILY.IP` 0.0092%, US Tech 100 `IX.D.NASDAQ.CASH.IP` 0.0035%, Germany 40 `IX.D.DAX.DAILY.IP` 0.0116%, Japan 225 `IX.D.NIKKEI.DAILY.IP` 0.0193%. Rates: US Treasury 10 Year Note ETF `UD.D.UTENUS.DAILY.IP` 0.3475% (IG has no gilt or bund daily bet with history, so the test is conservative on rates cost). Currencies: EUR/USD `CS.D.EURUSD.TODAY.IP` 0.008%, GBP/USD `CS.D.GBPUSD.TODAY.IP` 0.011%, USD/JPY `CS.D.USDJPY.TODAY.IP` 0.006%, AUD/USD `CS.D.AUDUSD.TODAY.IP` 0.0131%. Metals: Gold `CS.D.USCGC.TODAY.IP` 0.008%, Silver `CS.D.USCSI.TODAY.IP` 0.0772%, Copper `CS.D.COPPER.TODAY.IP` 0.218% (the quote seen when the market was open). Energy: Crude oil `CC.D.CL.USS.IP` 0.060%, Natural gas `CC.D.NG.USS.IP` 0.0922%. A market joins the sleeve once it has 12 monthly returns.
+
+**Signals (computed at each month end, held for the next month).**
+- Primary, V2 (the blend, chosen from the research and not from our data): the average of the signs of the 1-month, 3-month and 12-month returns, so each market's signal is -1, -1/3, +1/3 or +1.
+- Comparison, V1 (textbook): the sign of the 12-month return.
+- Both versions are reported, the primary is fixed as V2 now, and two variants have been tried.
+
+**Sizing.** Each market's raw weight is its signal times 10% divided by its own annualised volatility (the standard deviation of its last 12 to 36 monthly returns, annualised), divided by the number of active markets. The whole sleeve is then scaled to a 10% annual volatility target using the trailing 12 to 36 months of the raw sleeve's own returns, with leverage between 1 and 3 (leverage 1 until 12 months of sleeve returns exist). No look-ahead.
+
+**Costs.** Spread: observed spread times 2 (a hedge for wider historical spreads), charged on traded notional at half the spread per side. Financing: 2.5% a year on gross notional (an assumption standing in for the daily-bet admin fee). Cash and collateral interest are not counted, so the sleeve's return is its excess over cash.
+
+**What is measured.** Net annualised return, volatility, return per unit of volatility, worst monthly drawdown and the longest time under water, the worst rolling 120-month net return and the share of windows at or above 4%, returns by period (up to 2009, 2010 to 2019, 2020 onwards), the 2008 and 2022 calendar years, the correlation with the US 500, cost and financing drag a year, turnover, and for the sleeve bar a static mix of 70% US 500 and 30% US Treasury 10 Year ETF (monthly, price returns only, no income) with and without the sleeve added as an overlay.
+
+**Reading.** PASS only if V2 meets both bars. V1 is shown for comparison only. With about two independent decades, no statistical significance is claimed: this is a consistency check on top of the published long-run evidence (SG Trend Index +20.9% in 2008 and +27.4% in 2022, weak through much of the 2010s, second-largest drawdown since 2000 of about 20% to May 2025: industry and secondary sources, not verified).
+
+**Limits.** Daily bets leave out the carry that quarterly futures embed, and the financing is an assumption. Gilts and bunds could not be included, so rates are the US 10-year only and at a conservative cost. Historical spreads are unknown. At a few thousand pounds minimum stakes make 14 positions granular, which is not modelled. The sample is small and the 2010s are inside it, so any tweak chosen after seeing them would be curve fitting and is not allowed.
+
+**If it passes.** The next step is paper-tracking on IG's live prices for a period before any real money, with the quarterly futures equivalents and an order flow that does not exist yet, and the user's explicit go. **If it fails,** we stop and the money stays in the ISA.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
