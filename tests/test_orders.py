@@ -374,3 +374,42 @@ def test_technical_flip_backed_by_the_news_proposes_closing_the_old_position(tmp
     not_backed = build_plan(PlanClient(up, positions=[short]), Journal(tmp_path / "j2.db"), engine, StrategyParams(), epic=EPIC,
                             account_id="A", env="live", events=[], now=NOW, inputs=CALM, headlines=[], view=None, backdrop={})
     assert not_backed.reductions == []                                       # no news backing: no reversal proposed
+
+
+def test_equity_floor_refuses_new_entries(tmp_path):
+    from ig_swing.config import CHALLENGE
+    engine = RiskEngine(CHALLENGE, KillSwitch(tmp_path / "ks.json"))
+    low = engine.evaluate_entry(EntryProposalForFloor(), AccountState(14.0, 14.0, 14.0), [], [], NOW)
+    assert not low.allowed and any("below the floor" in r for r in low.reasons)
+    ok = engine.evaluate_entry(EntryProposalForFloor(), AccountState(45.0, 45.0, 45.0), [], [], NOW)
+    assert ok.allowed
+
+
+def EntryProposalForFloor():
+    from ig_swing.risk import EntryProposal
+    return EntryProposal(EPIC, "BUY", 100.0, 0.01, 1.0)
+
+
+def test_cooldown_blocks_entries_after_two_losses_in_a_row_and_expires(tmp_path):
+    from datetime import timedelta
+    from ig_swing.config import CHALLENGE
+    c = FakeClient()
+    engine = RiskEngine(CHALLENGE, KillSwitch(tmp_path / "ks.json"))
+    j = Journal(tmp_path / "j.db")
+    asked = []
+    s = OrderService(c, engine, j, lambda t: asked.append(t) or True, env="live")
+    acct = AccountState(45.0, 45.0, 45.0)
+    entry = {**ENTRY, "account": acct, "stop_distance": 100.0, "target_distance": 200.0}
+    for i in range(2):                                                                        # two losing trades
+        tid = j.open_trade(opened_at=NOW.isoformat(), epic=EPIC, direction="BUY", size=0.01, entry=7600.0, stop=7500.0, risk_gbp=1.0, env="live")
+        j.close_trade(tid, (NOW - timedelta(hours=1)).isoformat(), 7500.0, "stop")
+    r = s.submit_entry(**entry)
+    assert not r.placed and any("cooldown" in x for x in r.reasons) and c.calls == []
+    later = s.submit_entry(**{**entry, "now": NOW + timedelta(hours=30)})
+    assert later.placed                                                                        # the cooldown has passed
+    # one win in between breaks the streak
+    tid = j.open_trade(opened_at=NOW.isoformat(), epic=EPIC, direction="BUY", size=0.01, entry=7600.0, stop=7500.0, risk_gbp=1.0, env="live")
+    j.close_trade(tid, (NOW + timedelta(hours=31)).isoformat(), 7700.0, "target")
+    c2 = FakeClient()
+    s2 = OrderService(c2, RiskEngine(CHALLENGE, KillSwitch(tmp_path / "ks2.json")), j, lambda t: True, env="live")
+    assert s2._cooldown_veto(NOW + timedelta(hours=32)) is None

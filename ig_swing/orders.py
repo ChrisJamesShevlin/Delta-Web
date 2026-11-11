@@ -13,7 +13,7 @@ results justify it, and it must be recorded in CLAUDE.md.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from .context import ContextVerdict
@@ -66,8 +66,9 @@ class OrderService:
         ts = now.isoformat()
         rules = self.client.get_market_rules(epic)
         positions = self.client.get_positions()
+        cooldown = self._cooldown_veto(now)
         proposal = EntryProposal(epic, direction, stop_distance, rules.min_deal_size, rules.min_stop_distance,
-                                 size_factor=context.size_factor, vetoes=context.vetoes)
+                                 size_factor=context.size_factor, vetoes=context.vetoes + ((cooldown,) if cooldown else ()))
         driver = driver or ",".join(context.drivers)
         decision = self.risk.evaluate_entry(proposal, account, positions, events, now)
         self.journal.record_decision(ts, epic, direction, setup, decision.allowed, decision.size, decision.reasons,
@@ -115,6 +116,23 @@ class OrderService:
             deal_ref=ref, deal_id=conf.deal_id,
         )
         return OrderResult(True, "placed", deal_id=conf.deal_id, size=decision.size, stop_level=conf.stop_level, trade_id=trade_id)
+
+    def _cooldown_veto(self, now: datetime) -> str | None:
+        """Poker-style tilt rule: after N losing trades in a row, no new entry until the cooldown has passed."""
+        lim = self.risk.limits
+        if lim.cooldown_losses <= 0 or lim.cooldown_hours <= 0:
+            return None
+        closed = self.journal.closed_trades()
+        last = closed[-lim.cooldown_losses:]
+        if len(last) < lim.cooldown_losses or not all((t["net_pnl"] or 0.0) < 0 for t in last):
+            return None
+        closed_at = datetime.fromisoformat(last[-1]["closed_at"])
+        if closed_at.tzinfo is None:
+            closed_at = closed_at.replace(tzinfo=now.tzinfo)
+        remaining = (closed_at + timedelta(hours=lim.cooldown_hours) - now).total_seconds() / 3600
+        if remaining > 0:
+            return f"cooldown: {lim.cooldown_losses} losing trades in a row, {remaining:.1f} hours left before the next entry"
+        return None
 
     def submit_close(self, position: Position, reason: str, now: datetime, size: float | None = None) -> OrderResult:
         """Close all or part of a position. Closing reduces risk but still needs confirmation."""

@@ -320,6 +320,8 @@ class RiskEngine:
         if active:
             reasons.append(f"kill switch active: {why}")
         reasons += self.refresh_halts(account, now)
+        if self.limits.min_equity_gbp and account.equity < self.limits.min_equity_gbp:
+            reasons.append(f"equity £{account.equity:.2f} is below the floor of £{self.limits.min_equity_gbp:.2f}: stop and review")
 
         if proposal.direction not in ("BUY", "SELL"):
             reasons.append("direction must be BUY or SELL")

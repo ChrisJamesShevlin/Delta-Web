@@ -107,3 +107,17 @@ def test_live_orders_and_closes_refused_unless_explicitly_enabled():
         )
     with pytest.raises(PermissionError, match="not enabled"):
         c.close_position(deal_id="D", direction="BUY", size=0.01, user_confirmed=True)
+
+
+def test_challenge_profile_is_only_chosen_on_live_with_the_explicit_switch(monkeypatch):
+    from ig_swing.config import CHALLENGE, LIVE_TEST, AGREED, risk_limits
+
+    monkeypatch.setattr("ig_swing.config._load_dotenv", lambda: None)
+    monkeypatch.delenv("IG_RISK_PROFILE", raising=False)
+    assert risk_limits("live") is LIVE_TEST
+    monkeypatch.setenv("IG_RISK_PROFILE", "challenge")
+    assert risk_limits("live") is CHALLENGE
+    assert risk_limits("demo") is AGREED                              # never on demo
+    monkeypatch.setenv("IG_RISK_PROFILE", "wild")
+    assert risk_limits("live") is LIVE_TEST                           # an unknown value never loosens anything
+    assert (CHALLENGE.max_risk_per_trade_pct, CHALLENGE.max_open_positions, CHALLENGE.min_equity_gbp, CHALLENGE.cooldown_losses) == (20.0, 2, 15.0, 2)

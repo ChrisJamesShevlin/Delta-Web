@@ -28,6 +28,9 @@ class RiskLimits:
     weekly_loss_limit_pct: float = 4.0     # halts new orders
     max_open_positions: int = 3
     max_total_open_risk_pct: float = 2.0
+    min_equity_gbp: float = 0.0            # new entries refused below this equity (0 = no floor)
+    cooldown_losses: int = 0               # this many losing trades in a row ...
+    cooldown_hours: float = 0.0            # ... blocks new entries for this long after the last one closed
 
 
 AGREED = RiskLimits()
@@ -42,6 +45,23 @@ LIVE_TEST = RiskLimits(
     weekly_loss_limit_pct=20.0,
     max_open_positions=1,
     max_total_open_risk_pct=5.0,
+)
+
+
+# The £45 play-money "double it" challenge, approved by the user on 2026-11-11 (see CLAUDE.md). Used only when
+# IG_ENV=live AND IG_RISK_PROFILE=challenge. The stop, user_confirmed and the minimum checks are unchanged. Poker-style
+# rules: a floor at £15 equity, two positions at most, and a 24 hour cooldown after two losses in a row.
+CHALLENGE = RiskLimits(
+    name="challenge",
+    risk_per_trade_pct=10.0,
+    max_risk_per_trade_pct=20.0,
+    daily_loss_limit_pct=25.0,
+    weekly_loss_limit_pct=40.0,
+    max_open_positions=2,
+    max_total_open_risk_pct=30.0,
+    min_equity_gbp=15.0,
+    cooldown_losses=2,
+    cooldown_hours=24.0,
 )
 
 
@@ -79,7 +99,13 @@ def ig_env() -> str:
 
 
 def risk_limits(env: str | None = None) -> RiskLimits:
-    return LIVE_TEST if (env or ig_env()) == "live" else AGREED
+    env = env or ig_env()
+    if env != "live":
+        return AGREED
+    _load_dotenv()
+    if os.environ.get("IG_RISK_PROFILE", "").strip().lower() == "challenge":
+        return CHALLENGE
+    return LIVE_TEST
 
 
 def base_url(env: str | None = None) -> str:
