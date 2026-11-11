@@ -179,8 +179,9 @@ def test_skips_are_named():
 
 def test_net_returns_under_each_cost_scenario():
     res = pt.EventResult("T", pd.Timestamp("2020-01-02"), 0.1, 1, 0.05, 0.05, 0.05, 1.0, 0.05, 30, "time")
-    a, b, c = (pt.net_pct(res, s) for s in pt.SCENARIOS.values())
+    a, b, c, d = (pt.net_pct(res, s) for s in pt.SCENARIOS.values())
     assert a == pytest.approx(0.05) and b == pytest.approx(0.05 - 0.001 - 0.065 * 30 / 365) and c == pytest.approx(b - 0.008)
+    assert d == pytest.approx(0.05 - 0.00125 - 0.062 * 30 / 365)
     short = pt.EventResult("T", pd.Timestamp("2020-01-02"), -0.1, -1, 0.05, 0.05, 0.05, 1.0, 0.05, 30, "time")
     assert pt.net_pct(short, pt.SCENARIOS["B spread 0.10% + financing (long 6.5% a year, short 3.0%)"]) == pytest.approx(0.05 - 0.001 - 0.03 * 30 / 365)
 

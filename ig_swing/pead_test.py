@@ -58,6 +58,10 @@ SCENARIOS: dict[str, dict[str, float]] = {
     "A gross, no costs": dict(spread=0.0, fin_long=0.0, fin_short=0.0, fx=0.0),
     "B spread 0.10% + financing (long 6.5% a year, short 3.0%)": dict(spread=0.0010, fin_long=0.065, fin_short=0.030, fx=0.0),
     "C as B plus 0.8% currency fee": dict(spread=0.0010, fin_long=0.065, fin_short=0.030, fx=0.008),
+    # Added 2026-11-11 from IG's own cost panel for NVDA at 0.01 a point (it showed no currency fee, so C does not apply):
+    # spread 0.125% round trip (22 points on 17,662), running cost about 0.017% a night on a long (about 6.2% a year).
+    # The short-side financing was NOT observed and stays at the assumed 3.0%.
+    "D observed IG ticket (spread 0.125%, long 6.2% a year, short 3.0% assumed)": dict(spread=0.00125, fin_long=0.062, fin_short=0.030, fx=0.0),
 }
 
 UNIVERSE = (

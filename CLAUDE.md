@@ -142,6 +142,12 @@ The historical drift result is flattered by hindsight (today's winners). `ig_swi
 - Events detected after their entry open (13:30 UTC the next business day) are kept on record but left out and cannot be read: they could not have been acted on in real time. The first five events (BKNG, CHTR, CVS, MCD, QCOM, reactions 4 to 6 November 2026) are in this backlog.
 - Reading rule: fewer than 100 finished events is no conclusion. About 88 triggered events a year are expected, so this takes about a year. The costs are the pre-registered scenarios until IG's live spread and the currency-fee question are checked. Nothing here changes any parameter of the historical test.
 
+### IG's real costs on a US share spread bet (observed 2026-11-11, from IG's own cost panel for NVDA)
+
+At what is evidently 0.01 pounds per point (notional about £176): opening cost £0.11, closing cost £0.11 (each is half of the 22-point spread, 0.125% round trip), daily running cost £0.03 a night (about 0.017% of notional, roughly 6% a year for a long). **No currency conversion fee appears, so scenario C does not apply.** The short-side running cost was not observed. Scenario D was added to `pead_test.SCENARIOS` with these numbers (the other scenarios are unchanged).
+
+Descriptive re-costing of the same holdout trades, NOT a new test and no new run: under scenario D the holdout mean per trade is +0.10% (SE 0.24%), +0.02R (SE 0.04R), indistinguishable from zero, as under scenario B. Split by side (post hoc, so not evidence): longs +1.33% (SE 0.35%), shorts -1.15% (SE 0.33%). The traded variant is unhedged, so that split mixes the earnings effect with the market's upward drift over 20 sessions (which helps longs and hurts shorts) and with survivorship bias (today's winners). A long-only version would be a new hypothesis needing its own pre-registration, and it is exactly where hindsight bias sits. The forward earnings watch is the test that can answer it.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
