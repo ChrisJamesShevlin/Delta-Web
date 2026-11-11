@@ -66,9 +66,9 @@ class OrderService:
         ts = now.isoformat()
         rules = self.client.get_market_rules(epic)
         positions = self.client.get_positions()
-        cooldown = self._cooldown_veto(now)
+        extra = tuple(v for v in (self._cooldown_veto(now), self._daily_trade_veto(now)) if v)
         proposal = EntryProposal(epic, direction, stop_distance, rules.min_deal_size, rules.min_stop_distance,
-                                 size_factor=context.size_factor, vetoes=context.vetoes + ((cooldown,) if cooldown else ()))
+                                 size_factor=context.size_factor, vetoes=context.vetoes + extra)
         driver = driver or ",".join(context.drivers)
         decision = self.risk.evaluate_entry(proposal, account, positions, events, now)
         self.journal.record_decision(ts, epic, direction, setup, decision.allowed, decision.size, decision.reasons,
@@ -117,6 +117,14 @@ class OrderService:
             deal_ref=ref, deal_id=conf.deal_id,
         )
         return OrderResult(True, "placed", deal_id=conf.deal_id, size=decision.size, stop_level=conf.stop_level, trade_id=trade_id)
+
+    def _daily_trade_veto(self, now: datetime) -> str | None:
+        """A cap on new entries per UTC day, so unattended placement cannot run away."""
+        cap = self.risk.limits.max_new_trades_per_day
+        if cap <= 0:
+            return None
+        n = self.journal.trades_opened_on(now.date().isoformat())
+        return f"daily limit: {n} new trade(s) already opened today, the maximum is {cap}" if n >= cap else None
 
     def _cooldown_veto(self, now: datetime) -> str | None:
         """Poker-style tilt rule: after N losing trades in a row, no new entry until the cooldown has passed."""

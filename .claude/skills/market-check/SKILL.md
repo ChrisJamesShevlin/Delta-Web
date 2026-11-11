@@ -1,6 +1,6 @@
 ---
 name: market-check
-description: Use when the user says "market check", "check the markets", "any trades?", or reports a sudden drop or spike in a market and asks whether there is a trade. Runs the read-only IG briefing or a single-market quick read, reads it, records shadow ideas with honest win probabilities and 1/8 Kelly sizing for the £45 play-money challenge, picks at most one live candidate, and shows the exact order. Never places an order without the user's explicit yes to that exact order.
+description: Use when the user says "market check", "check the markets", "any trades?", or reports a sudden drop or spike in a market and asks whether there is a trade. Runs the read-only IG briefing or a single-market quick read, reads it, records shadow ideas with honest win probabilities and 1/8 Kelly sizing for the £45 play-money challenge, picks at most one live candidate, and shows the exact order. Places at most one order per check on its own under the user's standing authorisation, only when every guardrail in the skill passes; otherwise stops and asks.
 ---
 
 # Market check (the £45 challenge)
@@ -36,18 +36,26 @@ For every idea you would seriously consider, record it with `python3 -m ig_swing
 - Record the ideas the user will not take live too. Do not cherry-pick afterwards.
 - The tool prints the 1/8 Kelly stake. If Kelly says do not trade, the idea stays shadow-only.
 
-## 4. The live candidate (at most one)
-Only if all of these hold: Kelly is positive, the stake fits the account (the briefing shows the stake hint and whether it is margin-limited or below the minimum), fewer than two positions are open, no cooldown or floor problem.
-1. Run the dry run: `python3 -m ig_swing.place --market ... --direction ... --stop ... --target ... --p-win ... --playbook ... --thesis "..." --idea-id N`. It places nothing and prints the exact order and a confirmation token.
-2. Show the user exactly that: market, direction, stake per point, stop, target, risk in pounds and percent, margin, spread. Say plainly that it is a gamble with no shown edge.
-3. **Wait for the user to say yes to that exact order, in the chat.** A general "ok" earlier does not count. If anything changes (stake, stop, target, market, direction), run the dry run again and ask again.
-4. Only then place it: `IG_LIVE_ORDERS=yes python3 -m ig_swing.place ... --confirm <token>`. Report the result, the deal id and the stop level IG attached.
+## 4. The live candidate (at most one per check): place it yourself
+The user's standing instruction (2026-11-11, for the £45 challenge account only): place orders as part of this skill without asking each time. So do not wait for a yes. The guardrails in code still apply and are not negotiable.
+
+Place it only if ALL of these hold:
+- Kelly is positive (never use `--ignore-kelly`), the dry run says the order is allowed, and the profile in its first line is `challenge`.
+- The stake fits (the dry run shows it), fewer than two positions are open, none is already open in that market, and the daily limit of two new trades is not reached.
+- The market is tradeable and the spread on the dry run is no more than about three times its normal level from the briefing.
+- There is a stated thesis, an invalidation (the stop), and an honest `--p-win`. You recorded the idea first with `idea` (record it live with `--live` if you place it).
+
+How: run the dry run `python3 -m ig_swing.place --market ... --direction ... --stop ... --target ... --p-win ... --playbook ... --thesis "..." --idea-id N`, check it passes, then place it straight away with `IG_LIVE_ORDERS=yes python3 -m ig_swing.place ...` (same arguments) `--confirm <token>`. Then tell the user at once, in plain words: what, why, stake, stop level IG attached, target, risk in pounds and percent, the deal id, and that it is a gamble with no shown edge.
+
+**Stop and ask the user instead of placing** if: any IG error or rate-limit message appears; the dry run is refused or the profile is not `challenge`; anything about the market or the order looks unusual or you are unsure of something material; the user's latest message told you to hold off. Show them the dry run and ask.
+
+Placing is the only trade action this authorisation covers. There is no command to close or change a position yet: if an open position needs attention, tell the user and do not improvise. IG holds each stop server-side.
 
 ## 5. Report
 Say what you saw, what you recorded, what (if anything) is proposed live, and what you do not know. Mention `python3 -m ig_swing.challenge report` for the scored shadow book and the probability check. Keep it short.
 
 ## Never
-- Place an order without the exact-order yes, or run a command with `IG_LIVE_ORDERS=yes` before it.
+- Place an order outside the conditions in step 4, with `--ignore-kelly`, when the profile is not `challenge`, or on any account other than the challenge account.
 - Change the risk caps, the floor, the cooldown, the Kelly fraction or any limit, or use `--ignore-kelly`, unless the user explicitly asks.
 - Remove or widen a stop, add to a position, or average down.
 - Retry IG calls in a loop after a rate-limit error, or print credentials.

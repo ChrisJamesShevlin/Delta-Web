@@ -118,6 +118,11 @@ class Journal:
             row = c.execute("SELECT equity FROM equity_daily WHERE day<=? ORDER BY day DESC LIMIT 1", (day,)).fetchone()
             return None if row is None else float(row["equity"])
 
+    def trades_opened_on(self, day: str) -> int:
+        """Trades opened on this UTC date (YYYY-MM-DD), open or closed."""
+        with self._conn() as c:
+            return int(c.execute("SELECT COUNT(*) FROM trades WHERE opened_at LIKE ?", (day + "%",)).fetchone()[0])
+
     def peak_equity(self) -> float | None:
         with self._conn() as c:
             row = c.execute("SELECT MAX(equity) AS m FROM equity_daily").fetchone()

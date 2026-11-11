@@ -5,8 +5,9 @@
 
 The dry run prints the exact order (market, direction, stake, stop, target, risk, margin) and the risk verdict, and places
 nothing. It also prints a short confirmation token that is tied to those exact details. To place the order BOTH must hold:
-the environment variable IG_LIVE_ORDERS=yes is set, and the token is passed back with --confirm. The assistant does this only
-after the user has said yes, in the chat, to that exact order. Changing the stake, stop, target, market or direction changes
+the environment variable IG_LIVE_ORDERS=yes is set, and the token is passed back with --confirm. The assistant does this under the user's standing
+authorisation of 2026-11-11 (no per-order yes) for the challenge account only, after its own dry run passes, and only with the
+challenge risk profile active. Changing the stake, stop, target, market or direction changes
 the token, so a different order can never go through on an old confirmation.
 
 Stake: 1/8 Kelly from --p-win and the stop and target distances (ig_swing.challenge), scaled below the profile's ceiling,
@@ -52,9 +53,10 @@ def plan_order(client: Any, journal: Any, engine: RiskEngine, market: str, direc
     factor = min(1.0, max(risk_pct, 0.0) / ceiling) if risk_pct > 0 else 0.01
     positions = client.get_positions()
     proposal = EntryProposal(epic, direction.upper(), stop, rules.min_deal_size, rules.min_stop_distance, size_factor=max(factor, 0.01))
-    cooldown = OrderService(client, engine, journal)._cooldown_veto(now)
-    if cooldown:
-        proposal = EntryProposal(epic, direction.upper(), stop, rules.min_deal_size, rules.min_stop_distance, size_factor=max(factor, 0.01), vetoes=(cooldown,))
+    svc = OrderService(client, engine, journal)
+    vetoes = tuple(v for v in (svc._cooldown_veto(now), svc._daily_trade_veto(now)) if v)
+    if vetoes:
+        proposal = EntryProposal(epic, direction.upper(), stop, rules.min_deal_size, rules.min_stop_distance, size_factor=max(factor, 0.01), vetoes=vetoes)
     decision = engine.evaluate_entry(proposal, account, positions, [], now)
     reasons += list(decision.reasons)
     price = (rules.bid + rules.offer) / 2
@@ -155,6 +157,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if plan["allowed"] else 1
         if not live_ok:
             print("REFUSED: live orders are off. Set IG_LIVE_ORDERS=yes for this one command.")
+            return 1
+        if engine.limits.name != "challenge":
+            print(f"REFUSED: the risk profile is {engine.limits.name}, not challenge. The floor, cooldown, drawdown brake and daily limit only apply with "
+                  "IG_RISK_PROFILE=challenge in .env, so nothing is placed without it.")
             return 1
         if args.ignore_kelly:
             journal.record_event(now.isoformat(), "kelly_override", json.dumps({"market": args.market, "direction": args.direction, "p_win": args.p_win}))

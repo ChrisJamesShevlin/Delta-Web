@@ -434,3 +434,26 @@ def test_journal_reports_the_peak_equity(tmp_path):
     for day, eq in (("2026-11-09", 45.0), ("2026-11-10", 52.5), ("2026-11-11", 47.0)):
         j.record_equity(day, eq, "live")
     assert j.peak_equity() == 52.5
+
+
+def test_daily_trade_cap_blocks_a_third_entry_and_resets_the_next_day(tmp_path):
+    from datetime import timedelta
+    from ig_swing.config import CHALLENGE
+    c = FakeClient()
+    engine = RiskEngine(CHALLENGE, KillSwitch(tmp_path / "ks.json"))
+    j = Journal(tmp_path / "j.db")
+    s = OrderService(c, engine, j, lambda t: True, env="live")
+    for _ in range(2):                                                                        # two trades opened today
+        j.open_trade(opened_at=NOW.isoformat(), epic=EPIC, direction="BUY", size=0.01, entry=7600.0, stop=7500.0, risk_gbp=1.0, env="live")
+    entry = {**ENTRY, "account": AccountState(45.0, 45.0, 45.0), "stop_distance": 100.0, "target_distance": 200.0}
+    r = s.submit_entry(**entry)
+    assert not r.placed and any("daily limit" in x for x in r.reasons) and c.calls == []
+    assert s._daily_trade_veto(NOW + timedelta(days=1)) is None                                # a new UTC day starts fresh
+    assert OrderService(c, RiskEngine(LIVE_TEST, KillSwitch(tmp_path / "k2.json")), j)._daily_trade_veto(NOW) is None   # no cap on other profiles
+
+
+def test_journal_counts_trades_by_open_date(tmp_path):
+    j = Journal(tmp_path / "j.db")
+    j.open_trade(opened_at="2026-11-11T09:00:00+00:00", epic=EPIC, direction="BUY", size=0.01, entry=1.0, stop=0.5, env="live")
+    j.open_trade(opened_at="2026-11-12T09:00:00+00:00", epic=EPIC, direction="BUY", size=0.01, entry=1.0, stop=0.5, env="live")
+    assert j.trades_opened_on("2026-11-11") == 1 and j.trades_opened_on("2026-11-13") == 0
