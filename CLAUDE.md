@@ -14,7 +14,18 @@ Automation does:
 - a trade journal (every trade logged with thesis, entry, stop, target, outcome)
 - reporting (expectancy, drawdown, costs)
 
-Automation does NOT: generate trade signals on its own, let an LLM place trades, or run any order without the user confirming it. An autonomous news or LLM signal bot is explicitly out of scope until the demo evidence justifies it.
+Automation does NOT: let an LLM place trades, or run any order without the user confirming it. (Revised 2026-11-11, see the decision record below: the news layer now takes part in decisions, and news-only trades stay in shadow mode until the evidence supports them.)
+
+## Decision record: news as a second vote (user decision, 2026-11-11)
+
+The user decided that technical analysis alone has no edge, that the plan in this file is a starting point and not a constraint, and that news must factor into decisions for entries and for any open position, not only act as a brake. Implemented in `ig_swing/context.py`, `news_view.py`, `sentiment.py` and `shadow.py`:
+
+- The assistant (Claude) reads the briefing in a session and records a structured, expiring **news view** (BULLISH/BEARISH/NEUTRAL, LOW/MEDIUM/HIGH, reasons). No external LLM API and no API key. The view is journalled.
+- Entry size follows conviction, never above the profile's target risk: news backs the trade = full target, no view or neutral = half, adverse medium = quarter, adverse high = no trade.
+- Open positions: an adverse high-confidence view proposes closing the whole position, adverse medium proposes halving. A technical flip that the news backs proposes closing the old position so the new direction can be entered.
+- **News-only entries are not traded.** A high-confidence view on a no-signal day is recorded in shadow mode and measured (`python3 -m ig_swing.shadow`). Under 100 finished ideas means no conclusion.
+- Unchanged hard limits: mandatory stop, `user_confirmed` on every order and close, size and loss limits, event blackout, live order placement disabled in code until the user says go.
+- Honest limit: we cannot beat professionals on speed. Free feeds lag and the view is read when a session asks. The hypothesis is consistency and breadth, not speed, and it is unproven. Every plan archives what the context layer saw (`news_snapshot` events) so it can be tested.
 
 ## Why swing trading (decided, do not reopen)
 

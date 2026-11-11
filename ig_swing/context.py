@@ -1,30 +1,37 @@
-"""News and cross-asset context: deterministic rules that sit on top of the technical signal.
+"""News and cross-asset context: deterministic rules that act as a second vote beside the technical signal.
 
-Role: the context layer can VETO an entry, HALVE its size, or PROPOSE trimming an
-open position. It never creates a trade. No LLM, no scoring model: fixed
-thresholds on IG's own VIX, oil and gold daily moves, plus a count of stress
-words in fresh market headlines.
+The technical engine finds the setup. This layer decides how much conviction the
+backdrop adds or removes, and what to do with positions already open. It cannot
+originate a live trade (news-only ideas are only recorded, see ig_swing.shadow),
+and it can never push size above the agreed per-trade target.
 
-Rules (all untested hypotheses, pre-registered here, and logged as the trade
-"driver" so the report can later split results by them):
+Conviction sizing for an entry (factor x the profile's target risk, capped at 1.0):
+- news view aligned with the trade (BULLISH for BUY, BEARISH for SELL), MEDIUM or
+  HIGH confidence: full target size.
+- no view, a NEUTRAL or LOW-confidence view: half size (the news has not backed the trade).
+- news view adverse, MEDIUM confidence: quarter size.
+- news view adverse, HIGH confidence: no trade.
+- without a view, BUY with several fresh stress headlines: quarter size.
+Open positions: an adverse HIGH view proposes closing the whole position, an
+adverse MEDIUM view proposes halving it. A technical flip that the news backs
+proposes closing the old position so the new direction can be entered.
+
+Price rules from IG's own VIX, oil and gold daily moves (all untested hypotheses,
+pre-registered here, and logged as the trade "driver" so the report can later
+split results by them):
 - BUY is vetoed when the VIX is up by the spike threshold or more (risk-off).
 - SELL is vetoed when the VIX is down by the spike threshold or more (vol collapse, rally).
 - BUY is vetoed when oil is up by the oil threshold or more (the "oil shock" idea).
-- News view (see ig_swing.news_view), when a valid one exists. It is adverse to
-  a BUY if BEARISH and adverse to a SELL if BULLISH. HIGH confidence adverse:
-  veto. MEDIUM adverse: size halved. LOW, NEUTRAL or supportive: a note only.
-  A view never starts a trade and never loosens any other rule.
-- Fallback when there is no valid view: BUY size is halved when several fresh
-  headlines carry stress words. With a view, stress words only add a note.
 - Gold only adds a note. Its meaning is ambiguous on its own.
 - Missing VIX or oil data vetoes every entry: we cannot confirm the backdrop.
 
 Thresholds are starting points, not tuned values. Changing them after seeing
 results moves the goalposts.
 
-Limits: headline matching is keyword counting, so it is noisy, and it only sees
-headlines that already passed the relevance filter in ig_swing.news.
-At the smallest stake a halving cannot reduce size below the market minimum.
+Limits: the stress-word count is keyword matching, so it is noisy. The news view is
+a judgement by the assistant in a session, not a measured signal, and its value is
+unproven: the journal archive exists so it can be tested. At the smallest stake a
+reduction cannot take size below the market minimum.
 """
 
 from __future__ import annotations
@@ -55,7 +62,8 @@ class ContextRules:
     gold_note_pct: float = 2.0
     stress_halve_count: int = 3
     stress_note_count: int = 1
-    halve_factor: float = 0.5
+    unsupported_factor: float = 0.5   # no view, or a neutral/low-confidence one
+    adverse_factor: float = 0.25      # adverse medium-confidence view, or stress headlines with no view
 
 
 @dataclass(frozen=True)
@@ -78,6 +86,13 @@ def stress_headlines(headlines: list[Headline]) -> list[Headline]:
 
 def _by_name(inputs: list[CrossAssetInput]) -> dict[str, CrossAssetInput]:
     return {i.name: i for i in inputs if i.pct_change is not None}
+
+
+def view_stance(direction: str, view: NewsView) -> tuple[bool, bool]:
+    """(adverse, aligned) of a view relative to a trade direction. Aligned needs MEDIUM or HIGH confidence."""
+    adverse = (direction == "BUY" and view.direction == "BEARISH") or (direction == "SELL" and view.direction == "BULLISH")
+    backs = (direction == "BUY" and view.direction == "BULLISH") or (direction == "SELL" and view.direction == "BEARISH")
+    return adverse, backs and view.confidence in ("MEDIUM", "HIGH")
 
 
 def assess(direction: str, inputs: list[CrossAssetInput] | None, headlines: list[Headline] | None, rules: ContextRules = ContextRules(),
@@ -111,28 +126,34 @@ def assess(direction: str, inputs: list[CrossAssetInput] | None, headlines: list
     if gold is not None and vix is not None and gold.pct_change >= rules.gold_note_pct and vix.pct_change > 0:
         notes.append(f"gold {gold.pct_change:+.1f}% with the VIX up: flight to safety")
 
-    factor = 1.0
     stress = stress_headlines(headlines)
+    factor = rules.unsupported_factor
     if view is not None:
         why = "; ".join(view.reasons)
-        adverse = (direction == "BUY" and view.direction == "BEARISH") or (direction == "SELL" and view.direction == "BULLISH")
+        adverse, aligned = view_stance(direction, view)
         if adverse and view.confidence == "HIGH":
             vetoes.append(f"news view {view.direction} (high confidence): {why}")
             drivers.append("news_view")
         elif adverse and view.confidence == "MEDIUM":
-            factor = rules.halve_factor
-            notes.append(f"news view {view.direction} (medium confidence), size halved: {why}")
+            factor = rules.adverse_factor
+            notes.append(f"news view {view.direction} (medium confidence) against this trade, quarter size: {why}")
             drivers.append("news_view")
+        elif aligned:
+            factor = 1.0
+            notes.append(f"news view {view.direction} ({view.confidence}) backs this trade, full target size: {why}")
+            drivers.append("news_aligned")
         else:
-            notes.append(f"news view {view.direction} ({view.confidence}): {why}")
+            notes.append(f"news view {view.direction} ({view.confidence}) does not back this trade, half size: {why}")
         if stress:
             notes.append(f"{len(stress)} stress headline(s) in the window (note only, a news view is in use)")
-    elif direction == "BUY" and len(stress) >= rules.stress_halve_count:
-        factor = rules.halve_factor
-        notes.append(f"{len(stress)} stress headlines in the window: long size halved")
-        drivers.append("headline_stress")
-    elif stress and len(stress) >= rules.stress_note_count:
-        notes.append(f"{len(stress)} stress headline(s) in the window")
+    else:
+        notes.append("no valid news view: half size")
+        if direction == "BUY" and len(stress) >= rules.stress_halve_count:
+            factor = rules.adverse_factor
+            notes.append(f"{len(stress)} stress headlines in the window: long size cut to a quarter")
+            drivers.append("headline_stress")
+        elif stress and len(stress) >= rules.stress_note_count:
+            notes.append(f"{len(stress)} stress headline(s) in the window")
 
     return ContextVerdict(direction, tuple(vetoes), factor, tuple(notes), tuple(drivers))
 
@@ -146,17 +167,22 @@ def plan_context_reductions(
     step: float = 0.01,
     view: NewsView | None = None,
 ) -> list[ReductionProposal]:
-    """Propose halving positions the current backdrop argues against. Proposals only.
+    """Propose trimming or closing positions the current backdrop argues against. Proposals only.
 
-    Missing data proposes nothing: absence of data is not evidence of risk, and
-    a position already has its stop.
+    An adverse HIGH-confidence news view proposes closing the whole position; any
+    other genuine signal proposes halving it. Missing data proposes nothing:
+    absence of data is not evidence of risk, and a position already has its stop.
     """
     if inputs is None or headlines is None:
         return []
     out = []
     for p in positions:
         v = assess(p.direction, inputs, headlines, rules, view)
-        if not v.drivers:  # only genuine signals, not the missing-data veto
+        if not [d for d in v.drivers if d != "news_aligned"]:  # genuine signals only, not the missing-data veto
+            continue
+        adverse, _ = view_stance(p.direction, view) if view is not None else (False, False)
+        if adverse and view.confidence == "HIGH":
+            out.append(ReductionProposal(p.deal_id, p.epic, p.size, "news view turned strongly against this position, close it: " + "; ".join(view.reasons)))
             continue
         close = _floor_to_step(p.size / 2, step)
         if close < min_size or p.size - close < min_size:

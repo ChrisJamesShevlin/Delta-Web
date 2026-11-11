@@ -331,3 +331,46 @@ def test_plan_says_why_there_is_no_view(tmp_path):
     p = build_plan(PlanClient(bars([100.0] * 100)), Journal(tmp_path / "j.db"), engine, StrategyParams(), epic=EPIC, account_id="A",
                    env="live", events=[], now=NOW, inputs=CALM, headlines=[], view=None, view_note="news view: none recorded (word-count fallback in use)")
     assert "none recorded" in format_plan(p)
+
+
+def test_strong_news_view_on_a_no_signal_day_is_recorded_once_and_never_traded(tmp_path):
+    import json
+    from ig_swing.news_view import make_view
+    v = make_view("BULLISH", "HIGH", ["Fed signals cuts"], NOW)
+    engine = RiskEngine(LIVE_TEST, KillSwitch(tmp_path / "ks.json"))
+    j = Journal(tmp_path / "j.db")
+    c = PlanClient(bars([100.0] * 100))
+    plans = [build_plan(c, j, engine, StrategyParams(), epic=EPIC, account_id="A", env="live", events=[], now=NOW,
+                        inputs=CALM, headlines=[], view=v, backdrop={}) for _ in range(2)]
+    p = plans[0]
+    ideas = [e for e in j.events() if e["kind"] == "shadow_news_idea"]
+    assert len(ideas) == 1 and json.loads(ideas[0]["detail"])["direction"] == "BUY"      # recorded once, not twice
+    assert p.signal is None and c.calls == [] and any("NOT traded" in n for n in p.notes)
+
+
+def test_no_shadow_idea_while_a_position_is_open_or_with_a_weaker_view(tmp_path):
+    from ig_swing.news_view import make_view
+    engine = RiskEngine(LIVE_TEST, KillSwitch(tmp_path / "ks.json"))
+    j = Journal(tmp_path / "j.db")
+    held = [position()]
+    build_plan(PlanClient(bars([100.0] * 100), positions=held), j, engine, StrategyParams(), epic=EPIC, account_id="A", env="live",
+               events=[], now=NOW, inputs=CALM, headlines=[], view=make_view("BULLISH", "HIGH", ["r"], NOW), backdrop={})
+    build_plan(PlanClient(bars([100.0] * 100)), j, engine, StrategyParams(), epic=EPIC, account_id="A", env="live",
+               events=[], now=NOW, inputs=CALM, headlines=[], view=make_view("BULLISH", "MEDIUM", ["r"], NOW), backdrop={})
+    assert [e for e in j.events() if e["kind"] == "shadow_news_idea"] == []
+
+
+def test_technical_flip_backed_by_the_news_proposes_closing_the_old_position(tmp_path):
+    from ig_swing.news_view import make_view
+    engine = RiskEngine(LIVE_TEST, KillSwitch(tmp_path / "ks.json"))
+    j = Journal(tmp_path / "j.db")
+    short = Position("S1", EPIC, "US 500", "SELL", 0.02, 7600.0, 7700.0, None, None, None, None)
+    up = bars(np.linspace(100, 200, 100))                                    # rising: technical signal is BUY
+    backed = build_plan(PlanClient(up, positions=[short]), j, engine, StrategyParams(), epic=EPIC, account_id="A", env="live",
+                        events=[], now=NOW, inputs=CALM, headlines=[], view=make_view("BULLISH", "HIGH", ["r"], NOW), backdrop={})
+    assert backed.signal.direction == "BUY"
+    assert [r.close_size for r in backed.reductions] == [0.02] and "close this position" in backed.reductions[0].reason
+    assert any(e["kind"] == "reversal_proposed" for e in j.events())
+    not_backed = build_plan(PlanClient(up, positions=[short]), Journal(tmp_path / "j2.db"), engine, StrategyParams(), epic=EPIC,
+                            account_id="A", env="live", events=[], now=NOW, inputs=CALM, headlines=[], view=None, backdrop={})
+    assert not_backed.reductions == []                                       # no news backing: no reversal proposed

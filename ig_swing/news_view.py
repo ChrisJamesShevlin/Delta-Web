@@ -2,8 +2,11 @@
 
 The headlines, IG cross-asset moves and market backdrop are shown by
 ``python3 -m ig_swing.briefing``. The assistant reads them and records a verdict
-here. The verdict can only act as a BRAKE (see ig_swing.context): it never
-starts a trade, flips a direction or changes stops or loss limits.
+here. The verdict is a second vote beside the technical signal (see
+ig_swing.context): it scales conviction, can cancel an entry, and can propose
+closing or reversing a position. It never raises size above the agreed target,
+never starts a live trade on its own (news-only ideas are recorded in shadow
+mode, see ig_swing.shadow) and never changes stops or loss limits.
 
 Safety:
 - Strict schema: anything malformed is treated as no view (the plan falls back to

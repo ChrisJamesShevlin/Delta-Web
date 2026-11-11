@@ -29,9 +29,9 @@ def heads(*titles):
     return [Headline(t, NOW, "t") for t in titles]
 
 
-def test_calm_backdrop_changes_nothing():
+def test_calm_backdrop_with_no_view_is_half_size_and_nothing_else():
     v = assess("BUY", calm(), [])
-    assert v.vetoes == () and v.size_factor == 1.0 and v.drivers == ()
+    assert v.vetoes == () and v.size_factor == 0.5 and v.drivers == ()
 
 
 def test_vix_spike_vetoes_longs_not_shorts():
@@ -68,13 +68,13 @@ def test_gold_never_vetoes_it_only_adds_a_note():
     assert v.vetoes == () and any("flight to safety" in n for n in v.notes)
 
 
-def test_stress_headlines_halve_longs_only_at_the_count():
+def test_stress_headlines_cut_longs_only_at_the_count_when_there_is_no_view():
     two = heads("Stocks plunge as banks tumble", "Markets in turmoil")
     three = two + heads("War fears hit Wall Street")
-    assert assess("BUY", calm(), two).size_factor == 1.0
+    assert assess("BUY", calm(), two).size_factor == 0.5          # baseline only
     v = assess("BUY", calm(), three)
-    assert v.size_factor == 0.5 and "headline_stress" in v.drivers
-    assert assess("SELL", calm(), three).size_factor == 1.0
+    assert v.size_factor == 0.25 and "headline_stress" in v.drivers
+    assert assess("SELL", calm(), three).size_factor == 0.5
 
 
 def test_stress_matching_is_whole_word():
@@ -127,24 +127,32 @@ def test_high_confidence_adverse_view_vetoes_only_the_adverse_direction():
     assert assess("BUY", calm(), [], view=view("BULLISH", "HIGH")).vetoes == ()
 
 
-def test_medium_adverse_view_halves_and_low_or_neutral_is_a_note():
+def test_conviction_sizing_from_the_view():
     m = assess("BUY", calm(), [], view=view("BEARISH", "MEDIUM"))
-    assert m.vetoes == () and m.size_factor == 0.5 and "news_view" in m.drivers
-    for d, c in (("BEARISH", "LOW"), ("NEUTRAL", "HIGH"), ("BULLISH", "HIGH")):
+    assert m.vetoes == () and m.size_factor == 0.25 and "news_view" in m.drivers
+    for d, c in (("BEARISH", "LOW"), ("NEUTRAL", "HIGH"), ("BULLISH", "LOW")):          # not backed: half size, no driver
         v = assess("BUY", calm(), [], view=view(d, c))
-        assert v.vetoes == () and v.size_factor == 1.0 and v.drivers == () and v.notes
+        assert v.vetoes == () and v.size_factor == 0.5 and v.drivers == ()
+    for d, c, direction in (("BULLISH", "HIGH", "BUY"), ("BULLISH", "MEDIUM", "BUY"), ("BEARISH", "HIGH", "SELL")):
+        v = assess(direction, calm(), [], view=view(d, c))                              # backed: full target size
+        assert v.size_factor == 1.0 and v.drivers == ("news_aligned",)
 
 
 def test_a_view_replaces_the_word_count_rule_but_never_loosens_a_price_veto():
     three = heads("Stocks plunge", "Markets tumble", "War fears grow")
-    assert assess("BUY", calm(), three).size_factor == 0.5                                # fallback: word count halves
+    assert assess("BUY", calm(), three).size_factor == 0.25                              # no view: word count cuts size
     v = assess("BUY", calm(), three, view=view("NEUTRAL", "HIGH"))
-    assert v.size_factor == 1.0 and any("note only" in n for n in v.notes)               # view in use: words are a note
-    spiked = assess("BUY", calm(vix=15), [], view=view("BULLISH", "HIGH"))
-    assert spiked.vetoes                                                                   # a bullish view cannot lift the VIX veto
+    assert v.size_factor == 0.5 and any("note only" in n for n in v.notes)               # view in use: words are a note
+    assert assess("BUY", calm(vix=15), [], view=view("BULLISH", "HIGH")).vetoes          # a backing view cannot lift the VIX veto
+    assert assess("BUY", calm(oil=4), [], view=view("BULLISH", "HIGH")).vetoes
 
 
-def test_adverse_view_proposes_trimming_a_position():
-    out = plan_context_reductions([position()], calm(), [], 0.01, view=view("BEARISH", "HIGH"))
-    assert len(out) == 1 and out[0].close_size == 0.02
-    assert plan_context_reductions([position("SELL")], calm(), [], 0.01, view=view("BEARISH", "HIGH")) == []
+def test_adverse_view_proposes_closing_or_halving_a_position():
+    high = plan_context_reductions([position()], calm(), [], 0.01, view=view("BEARISH", "HIGH"))
+    assert len(high) == 1 and high[0].close_size == 0.04 and "close it" in high[0].reason       # the whole position
+    med = plan_context_reductions([position()], calm(), [], 0.01, view=view("BEARISH", "MEDIUM"))
+    assert len(med) == 1 and med[0].close_size == 0.02
+    assert plan_context_reductions([position("SELL")], calm(), [], 0.01, view=view("BEARISH", "HIGH")) == []   # the short agrees
+    assert plan_context_reductions([position()], calm(), [], 0.01, view=view("BULLISH", "HIGH")) == []        # a backing view: hold
+    assert plan_context_reductions([position()], calm(), [], 0.01) == []                                      # no view: nothing proposed
+    assert len(plan_context_reductions([position(size=0.01)], calm(), [], 0.01, view=view("BEARISH", "HIGH"))) == 1  # a minimum position can still be closed

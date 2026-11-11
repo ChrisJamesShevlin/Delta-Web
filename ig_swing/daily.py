@@ -14,12 +14,13 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from .context import ContextVerdict, assess, plan_context_reductions
+from .context import ContextVerdict, assess, plan_context_reductions, view_stance
 from .events import Event
 from .ig_client import Position
 from .inputs import CrossAssetInput
 from .news import Headline
 from .news_view import NewsView, format_view, load_view
+from .shadow import KIND as SHADOW_KIND, already_recorded, news_only_idea
 from .sentiment import Backdrop, backdrop_snapshot, format_backdrop, load_backdrop
 from .journal import Journal
 from .risk import AccountState, Decision, EntryProposal, ReductionProposal, RiskEngine, plan_event_reductions
@@ -103,9 +104,22 @@ def build_plan(
     signal = generate_signal(df, strat)
     if signal is None:
         journal.record_decision(ts, epic, None, None, False, 0.0, ["no signal"], {"equity": equity, "bars": len(df)})
+        idea = news_only_idea(df, view, strat) if not any(p.epic == epic for p in positions) else None
+        if idea is not None and not already_recorded(journal.events(), idea):
+            idea["context_vetoes"] = list(assess(idea["direction"], inputs, headlines, view=view).vetoes)
+            journal.record_event(ts, SHADOW_KIND, json.dumps(idea))
+            notes.append(f"Shadow idea recorded, NOT traded: {idea['direction']} on a strong news view, stop {idea['stop_distance']:.1f} pts")
         return Plan(None, None, account, positions, notes, None, reductions, False, view, view_note, backdrop or {})
 
     context = assess(signal.direction, inputs, headlines, view=view)
+    if view is not None and view_stance(signal.direction, view)[1]:
+        for p in positions:
+            if p.epic == epic and p.direction != signal.direction:
+                reductions[:] = [x for x in reductions if x.deal_id != p.deal_id]  # the reversal reason supersedes a plain trim
+                r = ReductionProposal(p.deal_id, p.epic, p.size, f"technical signal flipped to {signal.direction} and the news view backs it: "
+                                      "close this position, then re-run the plan to enter the new direction")
+                reductions.append(r)
+                journal.record_event(ts, "reversal_proposed", f"{r.deal_id}: close {r.close_size}: {r.reason}")
     proposal = EntryProposal(epic, signal.direction, signal.stop_distance, rules.min_deal_size, rules.min_stop_distance,
                              size_factor=context.size_factor, vetoes=context.vetoes)
     decision = engine.evaluate_entry(proposal, account, positions, events, now)
