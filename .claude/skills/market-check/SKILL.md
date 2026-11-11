@@ -14,6 +14,14 @@ Read the section "The £45 play-money challenge" in CLAUDE.md first. Those rules
 
 What the data does and does not cover, so you do not overclaim: the calendar is US releases (BLS and FRED dates, the Fed's meeting dates) with times only where BLS gives them, and no forecasts or consensus numbers; there is no UK or euro-area calendar and no earnings calendar here. Headlines are titles only from the free RSS feeds and Finnhub. IG client positioning comes from IG's own sentiment feed. If the cause of a move is not in this data, use WebSearch to look for it, and say plainly when you still cannot find one.
 
+## 1b. Research pass (for any idea you might take live, and for any sudden move you cannot explain)
+Use WebSearch and WebFetch for about three to six lookups, not an open-ended trawl. Aim to find:
+- the **cause and timing** of the move, from a primary or wire source (a central bank statement, the BLS or other official release, Reuters, AP, Bloomberg, the company filing) rather than a blog;
+- for a data release, the **forecast against the actual number**: the surprise is what moves price, and the free calendar has no forecasts;
+- **how much is already priced in**: when the news broke and how far price has moved since, because a move that has already happened is not a trade;
+- the other side: the best argument against the idea, and what would prove it wrong.
+Record how deep you went with `--research none|headlines|web` and the sources you relied on with `--source` (repeatable). More reading is not an edge: markets absorb news in seconds and you are reading it late, so do not raise `--p-win` because a story sounds convincing. A persuasive narrative found after the move is a reason for suspicion. The report compares results by research depth, which is how we find out whether reading more helps. Flag secondary or promotional sources as such.
+
 ## 2. Read it like an analyst
 - How big is the move in daily ranges (ATR)? Over two is unusual. Is it market-wide or one market?
 - Is there a cause in the headlines or the calendar (CPI, jobs, FOMC, geopolitics)? Say if you cannot find one.

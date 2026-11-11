@@ -43,6 +43,8 @@ MARKETS: dict[str, tuple[str, str, float]] = {
     "Germany 40": ("IX.D.DAX.DAILY.IP", "DE30", 5.0),
 }
 PLAYBOOKS = ("event_reaction", "news_thesis", "earnings", "trend", "sentiment", "other")
+RESEARCH_LEVELS = ("none", "headlines", "web")          # how much reading went into the idea, so the report can test whether it helps
+MAX_SOURCES = 6
 CONFIDENCES = ("LOW", "MEDIUM", "HIGH")
 COST_R = 0.05                       # assumed cost of a trade in multiples of the risk
 KELLY_FRACTION = 0.125            # the user's choice: an eighth of Kelly guards against my probabilities being a few points too high
@@ -77,7 +79,8 @@ class InvalidIdea(ValueError):
 
 
 def make_idea(idea_id: int, now: datetime, market: str, direction: str, entry: float, spread_pts: float, stop_pts: float, target_pts: float,
-              p_win: float, playbook: str, confidence: str, thesis: str, horizon_days: int = 5, live: bool = False) -> dict[str, Any]:
+              p_win: float, playbook: str, confidence: str, thesis: str, horizon_days: int = 5, live: bool = False,
+              research: str = "headlines", sources: list[str] | None = None) -> dict[str, Any]:
     direction, confidence = direction.upper(), confidence.upper()
     if market not in MARKETS:
         raise InvalidIdea(f"market must be one of {list(MARKETS)}")
@@ -93,9 +96,14 @@ def make_idea(idea_id: int, now: datetime, market: str, direction: str, entry: f
         raise InvalidIdea(f"a thesis of 1 to {MAX_THESIS} characters is required")
     if not 1 <= horizon_days <= 30:
         raise InvalidIdea("horizon must be 1 to 30 days")
+    if research not in RESEARCH_LEVELS:
+        raise InvalidIdea(f"research must be one of {RESEARCH_LEVELS}")
+    sources = [x.strip() for x in (sources or []) if x.strip()]
+    if len(sources) > MAX_SOURCES or any(len(x) > 300 for x in sources):
+        raise InvalidIdea(f"at most {MAX_SOURCES} sources of up to 300 characters each")
     return {"id": idea_id, "ts": now.isoformat(), "market": market, "direction": direction, "entry": float(entry), "spread_pts": float(spread_pts),
             "stop_pts": float(stop_pts), "target_pts": float(target_pts), "p_win": float(p_win), "playbook": playbook, "confidence": confidence,
-            "thesis": thesis.strip(), "horizon_days": int(horizon_days), "live": bool(live)}
+            "thesis": thesis.strip(), "horizon_days": int(horizon_days), "live": bool(live), "research": research, "sources": sources}
 
 
 def load_ideas(events: list[dict]) -> list[dict]:
@@ -193,10 +201,10 @@ def format_report(m: dict[str, Any]) -> str:
     lines = [f"Challenge shadow book: {m['total']} ideas recorded, {len(fin)} finished (n={len(fin)}), {m['pending']} still running"]
     if fin:
         lines.append(f"  all: mean {mean:+.2f}R, SE {('n/a' if se != se else f'{se:.2f}')}, win rate {pct(sum(1 for r in rs if r > 0) / len(rs))}")
-        for label, key in (("playbook", "playbook"), ("confidence", "confidence")):
+        for label, key in (("playbook", "playbook"), ("confidence", "confidence"), ("research", "research")):
             groups: dict[str, list[float]] = {}
             for i, r in fin:
-                groups.setdefault(i[key], []).append(r["r"])
+                groups.setdefault(i.get(key, "headlines"), []).append(r["r"])
             for g, xs in sorted(groups.items()):
                 gm, _ = mean_se(xs)
                 lines.append(f"  {label} {g}: n={len(xs)}, mean {gm:+.2f}R" + ("  (under 30: noise)" if len(xs) < 30 else ""))
@@ -347,6 +355,8 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--thesis", required=True)
     i.add_argument("--horizon", type=int, default=5)
     i.add_argument("--live", action="store_true", help="mark that this idea was taken live")
+    i.add_argument("--research", choices=RESEARCH_LEVELS, default="headlines", help="none, the briefing headlines only, or a web research pass")
+    i.add_argument("--source", action="append", default=[], help="a source you relied on (a URL or a title), repeatable")
     args = ap.parse_args(argv)
 
     from .bars import clean_daily
@@ -367,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
             entry = snap.offer if direction == "BUY" else snap.bid
             n = len(load_ideas(journal.events())) + 1
             idea = make_idea(n, now, args.market, direction, entry, snap.offer - snap.bid, args.stop, args.target, args.p_win, args.playbook,
-                             args.confidence, args.thesis, args.horizon, args.live)
+                             args.confidence, args.thesis, args.horizon, args.live, args.research, args.source)
             journal.record_event(now.isoformat(), KIND, json.dumps(idea))
             rr = args.target / args.stop
             ks = kelly_fraction(args.p_win, rr)

@@ -133,3 +133,21 @@ def test_briefing_text_contains_the_pieces():
 def test_constants():
     assert ch.KELLY_FRACTION == 0.125 and ch.CAP_UNTIL_CALIBRATED == 5.0 and ch.CAP_CALIBRATED == 10.0 and ch.CALIBRATION_MIN == 30
     assert len(ch.MARKETS) == 9
+
+
+def test_research_depth_and_sources_are_recorded_and_validated():
+    i = idea(research="web", sources=["https://www.federalreserve.gov/newsevents/pressreleases/x.htm", "  ", "BLS CPI release"])
+    assert i["research"] == "web" and i["sources"] == ["https://www.federalreserve.gov/newsevents/pressreleases/x.htm", "BLS CPI release"]
+    assert idea()["research"] == "headlines" and idea()["sources"] == []
+    for bad in (dict(research="deep"), dict(sources=["s"] * 7), dict(sources=["x" * 301])):
+        with pytest.raises(ch.InvalidIdea):
+            idea(**bad)
+
+
+def test_the_report_splits_results_by_research_depth_and_treats_old_ideas_as_headlines():
+    old = idea(idea_id=1)
+    old.pop("research")                                                              # recorded before the field existed
+    deep = idea(idea_id=2, research="web")
+    b = {"EUR/USD": bars([FLAT, (11000.0, 11250.0, 10995.0, 11200.0)])}
+    text = ch.format_report(ch.measure([old, deep], lambda m: b[m]))
+    assert "research headlines: n=1" in text and "research web: n=1" in text
