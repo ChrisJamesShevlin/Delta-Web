@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -32,7 +33,7 @@ KIND = "challenge_idea"
 # name -> (daily-bet epic, IG client sentiment id, margin %). Epics, sentiment ids, margins and minimum stakes (all 0.01 a point)
 # were read from IG's batch market call on 2026-11-11. The list is a starting set of liquid markets with spreads under about 0.05%
 # (the Hong Kong indices at 0.15% and above and copper at 0.2% and above were left out for cost).
-MARKETS: dict[str, tuple[str, str, float]] = {
+ALL_MARKETS: dict[str, tuple[str, str, float]] = {
     "EUR/USD": ("CS.D.EURUSD.TODAY.IP", "EURUSD", 3.33),
     "GBP/USD": ("CS.D.GBPUSD.TODAY.IP", "GBPUSD", 3.33),
     "USD/JPY": ("CS.D.USDJPY.TODAY.IP", "USDJPY", 3.33),
@@ -56,14 +57,41 @@ MARKETS: dict[str, tuple[str, str, float]] = {
     "FTSE 100": ("IX.D.FTSE.DAILY.IP", "FT100", 5.0),
     "France 40": ("IX.D.CAC.DAILY.IP", "FR40", 5.0),
     "Japan 225": ("IX.D.NIKKEI.DAILY.IP", "JP225", 5.0),
+    # US shares (24 hour markets). Snapshot only in the briefing (no daily bars) to protect the price allowance; the quick read adds bars.
+    # The margin here is only a placeholder: the live margin is read from IG on every run. No sentiment id is known for shares.
+    "Apple": ("UA.D.AAPL.DAILY.IP", "", 20.0),
+    "Microsoft": ("UC.D.MSFT.DAILY.IP", "", 20.0),
+    "NVIDIA": ("UC.D.NVDA.DAILY.IP", "", 20.0),
+    "Amazon": ("UA.D.AMZN.DAILY.IP", "", 20.0),
+    "Alphabet": ("UB.D.GOOGL.DAILY.IP", "", 20.0),
+    "Meta": ("UB.D.FB.DAILY.IP", "", 20.0),
+    "Tesla": ("UD.D.TSLA.DAILY.IP", "", 20.0),
+    "Netflix": ("UC.D.NFLX.DAILY.IP", "", 20.0),
+    "Intel": ("UB.D.INTC.DAILY.IP", "", 20.0),
 }
+SHARES = ("Apple", "Microsoft", "NVIDIA", "Amazon", "Alphabet", "Meta", "Tesla", "Netflix", "Intel")
+# Every check covers every market in this list (the user's instruction, 2026-11-11: not just currencies, also the stock indices,
+# Brent crude, gold and the rest). Any of them can also be named for a closer look.
+MARKETS = ALL_MARKETS
+
+PROMO_PATTERNS = ("zacks", "motley fool", "wall street analysts", "analysts expect", "analysts believe", "analysts predict", "analysts see",
+                  "could rally", "potential to rally", "upside in", "crosses above", "yield territory", "earnings call transcript",
+                  "preferred stock", "preferred shares", "here's how to trade", "price target")
+
+
+def drop_promotional(headlines: list) -> list:
+    """Remove promotional and low-signal headlines (analyst-upside pieces, preferred-share yield notes, transcripts)."""
+    return [h for h in headlines if not any(p in h.title.lower() for p in PROMO_PATTERNS)]
+
+
 ASSET_CLASS: dict[str, str] = {
     **{m: "Currencies" for m in ("EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "EUR/GBP", "USD/CAD", "USD/CHF", "NZD/USD", "GBP/JPY", "EUR/JPY")},
     **{m: "Metals" for m in ("Gold", "Silver")},
     **{m: "Energy" for m in ("Crude oil", "Brent crude", "Natural gas")},
     **{m: "Stock indices" for m in ("US Tech 100", "US 500", "Wall Street", "US Russell 2000", "Germany 40", "FTSE 100", "France 40", "Japan 225")},
+    **{m: "US shares" for m in SHARES},
 }
-CLASS_ORDER = ("Stock indices", "Metals", "Energy", "Currencies")
+CLASS_ORDER = ("Stock indices", "US shares", "Metals", "Energy", "Currencies")
 PLAYBOOKS = ("event_reaction", "news_thesis", "earnings", "trend", "sentiment", "other")
 RESEARCH_LEVELS = ("none", "headlines", "web")          # how much reading went into the idea, so the report can test whether it helps
 MAX_SOURCES = 6
@@ -102,10 +130,10 @@ class InvalidIdea(ValueError):
 
 def make_idea(idea_id: int, now: datetime, market: str, direction: str, entry: float, spread_pts: float, stop_pts: float, target_pts: float,
               p_win: float, playbook: str, confidence: str, thesis: str, horizon_days: int = 5, live: bool = False,
-              research: str = "headlines", sources: list[str] | None = None) -> dict[str, Any]:
+              research: str = "headlines", sources: list[str] | None = None, epic: str | None = None) -> dict[str, Any]:
     direction, confidence = direction.upper(), confidence.upper()
-    if market not in MARKETS:
-        raise InvalidIdea(f"market must be one of {list(MARKETS)}")
+    if not market or not market.strip():
+        raise InvalidIdea("a market name is required (any market on IG is allowed)")
     if direction not in ("BUY", "SELL"):
         raise InvalidIdea("direction must be BUY or SELL")
     if not (stop_pts > 0 and target_pts > 0 and entry > 0 and spread_pts >= 0):
@@ -125,7 +153,7 @@ def make_idea(idea_id: int, now: datetime, market: str, direction: str, entry: f
         raise InvalidIdea(f"at most {MAX_SOURCES} sources of up to 300 characters each")
     return {"id": idea_id, "ts": now.isoformat(), "market": market, "direction": direction, "entry": float(entry), "spread_pts": float(spread_pts),
             "stop_pts": float(stop_pts), "target_pts": float(target_pts), "p_win": float(p_win), "playbook": playbook, "confidence": confidence,
-            "thesis": thesis.strip(), "horizon_days": int(horizon_days), "live": bool(live), "research": research, "sources": sources}
+            "thesis": thesis.strip(), "horizon_days": int(horizon_days), "live": bool(live), "research": research, "sources": sources, "epic": epic}
 
 
 def load_ideas(events: list[dict]) -> list[dict]:
@@ -207,7 +235,7 @@ def calibration(finished: list[tuple[dict, dict]]) -> dict[str, Any]:
 def measure(ideas: list[dict], get_bars: Callable[[str], pd.DataFrame]) -> dict[str, Any]:
     finished, pending = [], 0
     for idea in ideas:
-        res = score_idea(idea, get_bars(idea["market"]))
+        res = score_idea(idea, get_bars(idea.get("epic") or idea["market"]))
         if res is None:
             pending += 1
         else:
@@ -264,7 +292,8 @@ def stake_hint(equity: float, risk_pct: float, stop_pts: float, price: float, ma
     return round(stake, 2), note
 
 
-def format_briefing(now: datetime, rows: list[dict], equity: float, positions: int, notes: list[str], events_text: list[str], headlines_text: list[str]) -> str:
+def format_briefing(now: datetime, rows: list[dict], equity: float, positions: int, notes: list[str], events_text: list[str], headlines_text: list[str],
+                    market_news: list[str] | None = None, earnings_text: list[str] | None = None) -> str:
     lines = [f"Challenge briefing, {now:%a %d %b %Y %H:%M} UTC. Equity £{equity:.2f}, open positions {positions}", ""]
     header = f"{'market':16} {'price':>9} {'day':>7} {'ATR pts':>8} {'ATR %':>6} {'20d range':>9} {'IG clients':>11} {'spread':>7}  stake for a 1.5 ATR stop at 10% risk"
     for cls in CLASS_ORDER:
@@ -276,14 +305,20 @@ def format_briefing(now: datetime, rows: list[dict], equity: float, positions: i
             stake = f"£{r['stake']:.2f}/pt {r['note']}".strip() if r["stake"] else r["note"]
             sent = "n/a" if r["long_pct"] is None else f"{r['long_pct']:.0f}% long"
             pos = "n/a" if r["range_pos"] is None else f"{r['range_pos'] * 100:.0f}%"
-            lines.append(f"{r['market']:16} {r['price']:>9.1f} {r['day_pct']:>+6.2f}% {r['atr']:>8.1f} {r['atr_pct']:>5.2f}% {pos:>9} {sent:>11} {r['spread_pct']:>6.3f}%  {stake}")
+            atr_txt = "n/a" if r["atr"] is None else f"{r['atr']:.1f}"
+            atrp_txt = "n/a" if r["atr_pct"] is None else f"{r['atr_pct']:.2f}"
+            lines.append(f"{r['market']:16} {r['price']:>9.1f} {r['day_pct']:>+6.2f}% {atr_txt:>8} {atrp_txt:>5}% {pos:>9} {sent:>11} {r['spread_pct']:>6.3f}%  {stake}")
         lines.append("")
     fits = [r["market"] for r in rows if r["stake"]]
     shadow = [r["market"] for r in rows if not r["stake"]]
     lines.append(f"Fits the live account at 10% risk ({len(fits)}): " + (", ".join(fits) or "none"))
     lines.append(f"Shadow book only at this account size ({len(shadow)}): " + (", ".join(shadow) or "none"))
     lines += ["", "Events, next 48 hours:"] + (events_text or ["  none found"])
-    lines += ["", "Headlines:"] + (headlines_text or ["  none found"])
+    if earnings_text is not None:
+        lines += ["", "Earnings in the next 3 days (shares on the list):"] + (earnings_text or ["  none found"])
+    lines += ["", "Headlines (macro and general):"] + (headlines_text or ["  none found"])
+    if market_news is not None:
+        lines += ["", "News by market (headlines that mention the market itself):"] + (market_news or ["  none found for any market"])
     if notes:
         lines += ["", "Notes:"] + [f"  {n}" for n in notes]
     lines += ["", "Write ideas with: python3 -m ig_swing.challenge idea --market ... --direction ... --stop ... --target ... --p-win ... --playbook ... --confidence ... --thesis ...",
@@ -315,13 +350,16 @@ MARKET_KEYWORDS: dict[str, tuple[str, ...]] = {
     "FTSE 100": ("ftse", "uk ", "london", "bank of england", "britain"),
     "France 40": ("cac", "france", "french", "euro", "ecb"),
     "Japan 225": ("nikkei", "japan", "yen", "boj"),
+    "Apple": ("apple", "iphone", "tim cook"), "Microsoft": ("microsoft", "azure", "openai"), "NVIDIA": ("nvidia", "chip", "jensen", "gpu"),
+    "Amazon": ("amazon", "aws", "bezos"), "Alphabet": ("alphabet", "google", "youtube", "waymo"), "Meta": ("meta platforms", " meta ", "meta's", "facebook", "instagram", "zuckerberg"),
+    "Tesla": ("tesla", "musk", "ev "), "Netflix": ("netflix", "streaming"), "Intel": ("intel", "chip", "foundry"),
 }
 MACRO_WORDS = ("fed", "fomc", "cpi", "inflation", "jobs", "payroll", "tariff", "rate", "recession", "war", "strike", "sanction")
 
 
-def relevant_headlines(headlines: list, market: str, limit: int = 6) -> list:
+def relevant_headlines(headlines: list, market: str, limit: int = 6, macro_padding: bool = True) -> list:
     """Headlines that mention the market's own keywords first, then broad macro ones. Newest first within each group."""
-    own = tuple(k.lower() for k in MARKET_KEYWORDS.get(market, ()))
+    own = tuple(k.lower() for k in MARKET_KEYWORDS.get(market, ())) or tuple(w for w in re.split(r"[^a-z0-9&]+", market.lower()) if len(w) >= 4)
     hit, macro = [], []
     for h in headlines:
         t = f" {h.title.lower()} "
@@ -329,7 +367,7 @@ def relevant_headlines(headlines: list, market: str, limit: int = 6) -> list:
             hit.append(h)
         elif any(k in t for k in MACRO_WORDS):
             macro.append(h)
-    return (hit + macro)[:limit]
+    return (hit + (macro if macro_padding else []))[:limit]
 
 
 def format_events(events: list, limit: int = 8) -> list[str]:
@@ -375,8 +413,14 @@ def batch_snapshots(client: Any, epics: list[str]) -> dict[str, Any]:
             s = m.get("snapshot", {})
             if s.get("bid") is None or s.get("offer") is None:
                 continue
-            out[m["instrument"]["epic"]] = SimpleNamespace(bid=float(s["bid"]), offer=float(s["offer"]), pct_change=s.get("percentageChange"),
-                                                           net_change=s.get("netChange"), status=s.get("marketStatus"))
+            i = m.get("instrument", {})
+            rules = m.get("dealingRules", {})
+            mf = i.get("marginFactor")
+            out[i["epic"]] = SimpleNamespace(bid=float(s["bid"]), offer=float(s["offer"]), pct_change=s.get("percentageChange"), net_change=s.get("netChange"),
+                                             status=s.get("marketStatus"), name=i.get("name"), sent_id=i.get("marketId"),
+                                             margin=float(mf) if mf not in (None, "") else None,
+                                             min_stake=float((rules.get("minDealSize") or {}).get("value") or 0.01),
+                                             min_stop=float((rules.get("minNormalStopOrLimitDistance") or {}).get("value") or 0.0))
     return out
 
 
@@ -389,27 +433,118 @@ def batch_sentiment(client: Any, ids: list[str]) -> dict[str, float]:
         return {}
 
 
-def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.DataFrame, datetime], pd.DataFrame]) -> tuple[list[dict], list[str]]:
+TICKERS = {"Apple": "AAPL", "Microsoft": "MSFT", "NVIDIA": "NVDA", "Amazon": "AMZN", "Alphabet": "GOOGL", "Meta": "META", "Tesla": "TSLA", "Netflix": "NFLX", "Intel": "INTC"}
+
+
+def ticker_for(name: str, epic: str = "") -> str | None:
+    """A US ticker for a share market: from the table, else from a share epic such as UA.D.AAPL.DAILY.IP. None for non-shares."""
+    if name in TICKERS:
+        return TICKERS[name]
+    parts = epic.split(".")
+    if len(parts) >= 4 and parts[0].startswith("U") and parts[1] == "D" and parts[3] == "DAILY":
+        return parts[2].upper()
+    return None
+
+
+def fetch_earnings(session: Any, api_key: str | None, start: Any, end: Any) -> list[dict]:
+    """US earnings dates in a window from Finnhub's free calendar. Empty on any failure or without a key."""
+    if not api_key:
+        return []
+    try:
+        r = session.get("https://finnhub.io/api/v1/calendar/earnings", params={"from": start.isoformat(), "to": end.isoformat(), "token": api_key}, timeout=20)
+        return r.json().get("earningsCalendar", []) if r.status_code == 200 else []
+    except Exception:
+        return []
+
+
+def format_earnings(calendar: list[dict], tickers: set[str], limit: int = 12) -> list[str]:
+    when = {"bmo": "before the open", "amc": "after the close", "dmh": "during the session"}
+    rows = sorted((c for c in calendar if c.get("symbol") in tickers), key=lambda c: (c.get("date", ""), c.get("symbol", "")))
+    out = []
+    for c in rows[:limit]:
+        est = c.get("epsEstimate")
+        out.append(f"  {c['symbol']}: {c.get('date')} {when.get(c.get('hour'), 'time n/a')}" + (f", EPS estimate {est}" if est is not None else ""))
+    return out
+
+
+def looks_like_epic(q: str) -> bool:
+    return bool(re.match(r"^[A-Z]{2}\.[A-Z]\.[A-Za-z0-9._-]+$", q.strip()))
+
+
+def resolve_market(client: Any, query: str) -> dict[str, Any]:
+    """Any market on IG, by default-list name, epic or search words. Live margin, minimum stake and quote are read from IG.
+
+    The default list is only a scan list, never a limit: this accepts anything IG offers as a daily bet.
+    """
+    q = query.strip()
+    if q in ALL_MARKETS:
+        epic = ALL_MARKETS[q][0]
+    elif looks_like_epic(q):
+        epic = q
+    else:
+        hits = client.search_markets(q)
+        cands = [h for h in hits if h.expiry in ("DFB", "-") and h.bid is not None and h.offer is not None and h.status == "TRADEABLE"]
+        cands = cands or [h for h in hits if h.expiry in ("DFB", "-")]
+        if not cands:
+            raise InvalidIdea(f"no daily-bet market found on IG for '{q}'")
+        ql = q.lower()
+
+        def score(h: Any) -> tuple:
+            n = h.name.lower()
+            exact = 0 if n == ql else 1 if n.startswith(ql) else 2 if ql in n else 3
+            ok = h.bid and h.offer and h.offer > h.bid
+            return (exact, 0 if "24 hours" in n else 1, (h.offer - h.bid) / ((h.offer + h.bid) / 2) if ok else 1.0)
+
+        epic = sorted(cands, key=score)[0].epic
+    snap = batch_snapshots(client, [epic]).get(epic)
+    if snap is None:
+        raise InvalidIdea(f"IG returned no quote for {epic}")
+    mid = (snap.bid + snap.offer) / 2
+    return {"name": snap.name or q, "epic": epic, "sent_id": snap.sent_id or "", "margin": snap.margin or 20.0, "min_stake": snap.min_stake,
+            "bid": snap.bid, "offer": snap.offer, "status": snap.status, "pct_change": snap.pct_change, "net_change": snap.net_change,
+            "spread_pct": (snap.offer - snap.bid) / mid * 100}
+
+
+def fit_line(info: dict[str, Any], equity: float, max_margin_share: float = 0.6) -> str:
+    """Whether the minimum stake in this market can be held on the account, by margin."""
+    mid = (info["bid"] + info["offer"]) / 2
+    notional = info["min_stake"] * mid
+    margin = notional * info["margin"] / 100
+    fits = margin <= equity * max_margin_share
+    return (f"{info['name']} [{info['epic']}]: price {mid:.1f}, spread {info['spread_pct']:.3f}%, minimum stake £{info['min_stake']:g}/pt = £{notional:.0f} exposure, "
+            f"margin {info['margin']:g}% = £{margin:.2f} -> " + ("fits the account" if fits else f"does NOT fit £{equity:.2f} (needs more than {max_margin_share:.0%} of equity as margin): shadow book only"))
+
+
+def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.DataFrame, datetime], pd.DataFrame],
+               markets: dict[str, tuple[str, str, float]] | None = None) -> tuple[list[dict], list[str]]:
     from .indicators import atr
     rows, notes = [], []
+    markets = MARKETS if markets is None else markets
     try:
-        snaps = batch_snapshots(client, [v[0] for v in MARKETS.values()])
+        snaps = batch_snapshots(client, [v[0] for v in markets.values()])
     except Exception as exc:  # type name only
         return [], [f"markets: unavailable ({type(exc).__name__})"]
-    for name, (epic, sent_id, margin) in MARKETS.items():
+    for name, (epic, sent_id, margin) in markets.items():
         try:
             snap = snaps.get(epic)
             if snap is None:
                 notes.append(f"{name}: no quote")
                 continue
-            bars = clean(client.get_prices(epic, "DAY", 30), now)
             price = (snap.bid + snap.offer) / 2
-            a = float(atr(bars, 14).iloc[-1])
-            hi, lo = float(bars["high"].tail(20).max()), float(bars["low"].tail(20).min())
-            stake, note = stake_hint(equity, 10.0, 1.5 * a, price, margin)
-            rows.append({"market": name, "price": price, "day_pct": snap.pct_change or 0.0, "atr": a, "atr_pct": a / price * 100,
-                         "range_pos": (price - lo) / (hi - lo) if hi > lo else None, "long_pct": None, "stake": stake, "note": note,
-                         "spread_pct": (snap.offer - snap.bid) / price * 100, "sent_id": sent_id})
+            margin = snap.margin or margin
+            if name in SHARES:
+                a, atr_pct, range_pos = None, None, None
+                stake, note = stake_hint(equity, 10.0, 0.03 * price, price, margin, snap.min_stake)
+                note = (note + " (stop assumed 3% away, no bars)").strip()
+            else:
+                bars = clean(client.get_prices(epic, "DAY", 30), now)
+                a = float(atr(bars, 14).iloc[-1])
+                hi, lo = float(bars["high"].tail(20).max()), float(bars["low"].tail(20).min())
+                stake, note = stake_hint(equity, 10.0, 1.5 * a, price, margin, snap.min_stake)
+                atr_pct, range_pos = a / price * 100, ((price - lo) / (hi - lo) if hi > lo else None)
+            rows.append({"market": name, "price": price, "day_pct": snap.pct_change or 0.0, "atr": a, "atr_pct": atr_pct,
+                         "range_pos": range_pos, "long_pct": None, "stake": stake, "note": note,
+                         "spread_pct": (snap.offer - snap.bid) / price * 100, "sent_id": sent_id or snap.sent_id or ""})
         except Exception as exc:  # type name only
             notes.append(f"{name}: unavailable ({type(exc).__name__})")
     return rows, notes
@@ -420,10 +555,12 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("brief")
     q = sub.add_parser("quick", help="a fast read on one market, for a sudden move")
-    q.add_argument("--market", required=True, choices=list(MARKETS))
+    q.add_argument("--market", required=True, help="any IG market: a name from the briefing, an epic, or search words")
     sub.add_parser("report")
+    f = sub.add_parser("find", help="look up any market on IG and see whether it fits the account")
+    f.add_argument("--term", required=True)
     i = sub.add_parser("idea")
-    i.add_argument("--market", required=True, choices=list(MARKETS))
+    i.add_argument("--market", required=True, help="any IG market: a name from the briefing, an epic, or search words")
     i.add_argument("--direction", required=True, choices=["BUY", "SELL", "buy", "sell"])
     i.add_argument("--stop", type=float, required=True, help="stop distance in points")
     i.add_argument("--target", type=float, required=True, help="target distance in points")
@@ -450,39 +587,50 @@ def main(argv: list[str] | None = None) -> int:
         from .ig_client import PriceCache
 
         client = IGClient(creds, base_url=base_url(env), allow_live=(env == "live"), cache=PriceCache(ttl_seconds=20 * 3600))
+        if args.cmd == "find":
+            equity = client.get_account(creds.account_id).equity
+            hits = [h for h in client.search_markets(args.term) if h.expiry in ("DFB", "-")][:8]
+            snaps = batch_snapshots(client, [h.epic for h in hits]) if hits else {}
+            for h in hits:
+                sn = snaps.get(h.epic)
+                if sn is None:
+                    print(f"{h.name} [{h.epic}]: {h.status}, no quote")
+                    continue
+                info = {"name": sn.name or h.name, "epic": h.epic, "margin": sn.margin or 20.0, "min_stake": sn.min_stake, "bid": sn.bid, "offer": sn.offer,
+                        "spread_pct": (sn.offer - sn.bid) / ((sn.offer + sn.bid) / 2) * 100}
+                print(fit_line(info, equity) + f" [{sn.status}]")
+            if not hits:
+                print(f"no daily-bet markets found for '{args.term}'")
+            return 0
         if args.cmd == "idea":
-            epic = MARKETS[args.market][0]
-            snap = client.get_snapshot(epic)
+            info = resolve_market(client, args.market)
             direction = args.direction.upper()
-            entry = snap.offer if direction == "BUY" else snap.bid
+            entry = info["offer"] if direction == "BUY" else info["bid"]
             n = len(load_ideas(journal.events())) + 1
-            idea = make_idea(n, now, args.market, direction, entry, snap.offer - snap.bid, args.stop, args.target, args.p_win, args.playbook,
-                             args.confidence, args.thesis, args.horizon, args.live, args.research, args.source)
+            idea = make_idea(n, now, info["name"], direction, entry, info["offer"] - info["bid"], args.stop, args.target, args.p_win, args.playbook,
+                             args.confidence, args.thesis, args.horizon, args.live, args.research, args.source, info["epic"])
             journal.record_event(now.isoformat(), KIND, json.dumps(idea))
             rr = args.target / args.stop
             ks = kelly_fraction(args.p_win, rr)
-            print(f"Recorded idea {n}: {direction} {args.market} at {entry}, stop {args.stop:g}, target {args.target:g} (reward to risk {rr:.1f}), p_win {args.p_win:.0%}")
+            print(f"Recorded idea {n}: {direction} {info['name']} at {entry}, stop {args.stop:g}, target {args.target:g} (reward to risk {rr:.1f}), p_win {args.p_win:.0%}")
             print(f"  full Kelly {ks * 100:.1f}% of the bankroll, 1/8 Kelly {100 * KELLY_FRACTION * ks:.1f}%; suggested risk {suggested_risk_pct(args.p_win, rr):.1f}% (cap {CAP_UNTIL_CALIBRATED:.0f}% until calibrated)"
                   + ("" if ks > 0 else "  -> Kelly says do not trade this"))
             return 0
         if args.cmd == "quick":
             from .indicators import atr
-            epic, sent_id, _ = MARKETS[args.market]
-            snap = client.get_snapshot(epic)
+            info = resolve_market(client, args.market)
+            epic, sent_id = info["epic"], info["sent_id"]
+            equity = client.get_account(creds.account_id).equity
             bars = clean_daily(client.get_prices(epic, "DAY", 30), now)
             try:
                 hourly = client.get_prices(epic, "HOUR", 24)
             except Exception:
                 hourly = None
-            long_pct = None
-            try:
-                s_ = client._call("GET", "/clientsentiment", "1", params={"marketIds": sent_id}, context="client sentiment")
-                long_pct = float(s_["clientSentiments"][0]["longPositionPercentage"])
-            except Exception:
-                pass
-            price = (snap.bid + snap.offer) / 2
-            info = {"price": price, "pct_change": snap.pct_change or 0.0, "net_change": snap.net_change or 0.0, "spread_pct": (snap.offer - snap.bid) / price * 100}
-            print(format_quick(args.market, info, float(atr(bars, 14).iloc[-1]), hourly, long_pct,
+            long_pct = batch_sentiment(client, [sent_id]).get(sent_id) if sent_id else None
+            quick_info = {"price": (info["bid"] + info["offer"]) / 2, "pct_change": info["pct_change"] or 0.0, "net_change": info["net_change"] or 0.0,
+                          "spread_pct": info["spread_pct"]}
+            print(fit_line(info, equity))
+            print(format_quick(info["name"], quick_info, float(atr(bars, 14).iloc[-1]), hourly, long_pct,
                                (float(bars["low"].tail(20).min()), float(bars["high"].tail(20).max())), len(client.get_positions())))
             import requests
 
@@ -493,10 +641,17 @@ def main(argv: list[str] | None = None) -> int:
             session = requests.Session()
             events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
             heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 40)
-            print("  Events, next 48 hours: " + ("" if format_events(events) else "none found"))
-            for line in format_events(events):
+            ev_lines = format_events(events)
+            print("  Events, next 48 hours:" + ("" if ev_lines else " none found"))
+            for line in ev_lines:
                 print(line)
-            rel = relevant_headlines(heads, args.market)
+            tk = ticker_for(info["name"], epic)
+            if tk:
+                er = format_earnings(fetch_earnings(session, optional_key("FINNHUB_API_KEY"), now.date(), now.date() + timedelta(days=7)), {tk})
+                print(f"  Earnings for {tk} in the next 7 days:" + ("" if er else " none found"))
+                for line in er:
+                    print(line)
+            rel = relevant_headlines(drop_promotional(heads), info["name"])
             print("  Headlines that mention this market or the macro backdrop (last 12 hours):" + ("" if rel else " none found"))
             for h in rel:
                 print(f"    {h.published:%H:%M} {h.title}")
@@ -504,7 +659,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  note: {n}")
             return 0
         if args.cmd == "report":
-            get_bars = lambda m: clean_daily(client.get_prices(MARKETS[m][0], "DAY", 60), now)
+            get_bars = lambda key: clean_daily(client.get_prices(key if looks_like_epic(key) else ALL_MARKETS[key][0], "DAY", 60), now)
             print(format_report(measure(load_ideas(journal.events()), get_bars)))
             return 0
         import requests
@@ -514,16 +669,23 @@ def main(argv: list[str] | None = None) -> int:
         from .news import load_headlines
 
         acct = client.get_account(creds.account_id)
-        rows, notes = build_rows(client, acct.equity, now, clean_daily)
+        rows, notes = build_rows(client, acct.equity, now, clean_daily, MARKETS)
         session = requests.Session()
-        sentiment = batch_sentiment(client, [r["sent_id"] for r in rows])
+        sentiment = batch_sentiment(client, [r["sent_id"] for r in rows if r["sent_id"]])
         for r in rows:
-            r["long_pct"] = sentiment.get(r["sent_id"])
+            r["long_pct"] = sentiment.get(r["sent_id"]) if r["sent_id"] else None
         events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
-        heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 10)
+        heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 40)
         ev_text = format_events(events)
-        hd_text = [f"  {h.published:%H:%M} {h.title}" for h in heads]
-        print(format_briefing(now, rows, acct.equity, len(client.get_positions()), notes + ev_notes + hd_notes, ev_text, hd_text))
+        clean_heads = drop_promotional(heads)
+        hd_text = [f"  {h.published:%H:%M} {h.title}" for h in clean_heads][:10]
+        market_news = []
+        for r in rows:
+            for h in relevant_headlines(clean_heads, r["market"], limit=2, macro_padding=False):
+                market_news.append(f"  {r['market']}: {h.published:%H:%M} {h.title}")
+        share_tickers = {t: n for n in ALL_MARKETS if (t := ticker_for(n, ALL_MARKETS[n][0]))}
+        earnings_text = format_earnings(fetch_earnings(session, optional_key("FINNHUB_API_KEY"), now.date(), now.date() + timedelta(days=3)), set(share_tickers))
+        print(format_briefing(now, rows, acct.equity, len(client.get_positions()), notes + ev_notes + hd_notes, ev_text, hd_text, market_news, earnings_text))
         limits = risk_limits(env)
         print(f"Risk profile: {limits.name} (cap {limits.max_risk_per_trade_pct:g}% a trade = £{acct.equity * limits.max_risk_per_trade_pct / 100:.2f}, floor £{limits.min_equity_gbp:g}, max {limits.max_open_positions} positions)")
         return 0

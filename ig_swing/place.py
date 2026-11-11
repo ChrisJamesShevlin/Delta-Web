@@ -25,7 +25,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from .challenge import KELLY_FRACTION, MARKETS, PLAYBOOKS, calibration, kelly_fraction, load_ideas, measure, suggested_risk_pct
+from .challenge import ALL_MARKETS, KELLY_FRACTION, PLAYBOOKS, calibration, kelly_fraction, load_ideas, looks_like_epic, measure, resolve_market, suggested_risk_pct
 from .context import ContextVerdict
 from .orders import OrderService
 from .risk import AccountState, EntryProposal, RiskEngine
@@ -39,9 +39,9 @@ def token_for(market: str, direction: str, stake: float, stop: float, target: fl
 
 
 def plan_order(client: Any, journal: Any, engine: RiskEngine, market: str, direction: str, stop: float, target: float, p_win: float,
-               account: AccountState, now: datetime, calibrated: bool = False, ignore_kelly: bool = False) -> dict[str, Any]:
+               account: AccountState, now: datetime, calibrated: bool = False, ignore_kelly: bool = False, info: dict[str, Any] | None = None) -> dict[str, Any]:
     """Everything needed to show, and later place, one order. Pure apart from reading the client."""
-    epic, _, margin_pct = MARKETS[market]
+    epic, margin_pct = (info["epic"], info["margin"]) if info else (ALL_MARKETS[market][0], ALL_MARKETS[market][2])
     rules = client.get_market_rules(epic)
     rr = target / stop
     kelly = kelly_fraction(p_win, rr)
@@ -117,7 +117,7 @@ def build_account(client: Any, journal: Any, account_id: str, now: datetime) -> 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ig_swing.place", description=__doc__.splitlines()[0])
-    ap.add_argument("--market", required=True, choices=list(MARKETS))
+    ap.add_argument("--market", required=True, help="any IG market: a name from the briefing, an epic, or search words")
     ap.add_argument("--direction", required=True, choices=["BUY", "SELL", "buy", "sell"])
     ap.add_argument("--stop", type=float, required=True)
     ap.add_argument("--target", type=float, required=True)
@@ -147,8 +147,9 @@ def main(argv: list[str] | None = None) -> int:
         ideas = load_ideas(journal.events())
         calibrated = False
         if len(ideas) >= 30:
-            calibrated = calibration(measure(ideas, lambda m: clean_daily(client.get_prices(MARKETS[m][0], "DAY", 60), now))["finished"])["calibrated"]
-        plan = plan_order(client, journal, engine, args.market, args.direction, args.stop, args.target, args.p_win, account, now, calibrated, args.ignore_kelly)
+            calibrated = calibration(measure(ideas, lambda key: clean_daily(client.get_prices(key if looks_like_epic(key) else ALL_MARKETS[key][0], "DAY", 60), now))["finished"])["calibrated"]
+        info = resolve_market(client, args.market)
+        plan = plan_order(client, journal, engine, info["name"], args.direction, args.stop, args.target, args.p_win, account, now, calibrated, args.ignore_kelly, info)
         print(f"Environment {env.upper()}, risk profile {engine.limits.name}, live orders {'ENABLED' if live_ok else 'off'}")
         print(describe(plan, account.equity))
         if args.confirm is None:
@@ -163,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
                   "IG_RISK_PROFILE=challenge in .env, so nothing is placed without it.")
             return 1
         if args.ignore_kelly:
-            journal.record_event(now.isoformat(), "kelly_override", json.dumps({"market": args.market, "direction": args.direction, "p_win": args.p_win}))
+            journal.record_event(now.isoformat(), "kelly_override", json.dumps({"market": info["name"], "direction": args.direction, "p_win": args.p_win}))
         res = execute(client, journal, engine, plan, account, now, args.confirm, args.thesis, args.playbook, env)
         if res["placed"] and args.idea_id:
             journal.record_event(now.isoformat(), "challenge_live", json.dumps({"idea_id": args.idea_id, "deal_id": res["deal_id"]}))
