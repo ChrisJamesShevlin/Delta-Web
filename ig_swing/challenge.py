@@ -256,7 +256,7 @@ MARKET_KEYWORDS: dict[str, tuple[str, ...]] = {
     "GBP/USD": ("pound", "sterling", "bank of england", "boe", "bailey", "gilt", "uk ", "britain"),
     "USD/JPY": ("yen", "boj", "japan", "dollar", "fed", "treasury yield"),
     "AUD/USD": ("aussie", "australia", "rba", "china", "dollar", "iron ore"),
-    "Gold": ("gold", "bullion", "dollar", "fed", "yield", "safe haven", "inflation"),
+    "Gold": ("gold", "bullion", "dollar", "fed", "treasury yield", "safe haven", "inflation"),
     "Crude oil": ("oil", "crude", "opec", "iran", "brent", "wti", "energy", "sanction"),
     "US Tech 100": ("nasdaq", "tech", "nvidia", "chip", " ai ", "apple", "microsoft", "fed", "earnings"),
     "US 500": ("s&p", "wall street", "stocks", "stock market", "fed", "earnings", "dow"),
