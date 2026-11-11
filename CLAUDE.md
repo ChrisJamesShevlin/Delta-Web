@@ -133,6 +133,15 @@ Reading, against the pre-registered rules: the primary test passes (holdout z +2
 
 Why the gross result should be discounted: (1) **survivorship and hindsight bias.** The universe is today's large caps, chosen because they succeeded, and the effect sits almost entirely in the long side (+1.21% against +0.16% for shorts), which is the pattern that bias would produce. The true effect is probably smaller and cannot be measured with free data. (2) The cost scenarios are assumptions from IG's pages. (3) Positions were not capped and the trades overlap in time. Not tested: whether reading the release text adds anything.
 
+## Forward test: earnings watch (started 2026-11-11, nothing is traded)
+
+The historical drift result is flattered by hindsight (today's winners). `ig_swing/earnings_watch.py` is the clean test: the same fixed 97 stocks, the same trigger (reaction of 5% or more), the same evaluation code as the historical test, run forward in real time with nothing ordered.
+
+- Each evening after 22:00 UTC (23:00 UK in winter): `python3 -m ig_swing.earnings_watch scan` records new triggered events in the journal and prints the release links. The assistant reads each release and records a verdict with `... read --ticker X --direction ... --confidence ... --reason ...` BEFORE the outcome is known, so the test can show whether reading the text adds anything beyond the price move.
+- `python3 -m ig_swing.earnings_watch report` measures finished events (20 sessions after entry) with the pre-registered primary measure, the three cost scenarios, and a split by whether the read backed the move.
+- Events detected after their entry open (13:30 UTC the next business day) are kept on record but left out and cannot be read: they could not have been acted on in real time. The first five events (BKNG, CHTR, CVS, MCD, QCOM, reactions 4 to 6 November 2026) are in this backlog.
+- Reading rule: fewer than 100 finished events is no conclusion. About 88 triggered events a year are expected, so this takes about a year. The costs are the pre-registered scenarios until IG's live spread and the currency-fee question are checked. Nothing here changes any parameter of the historical test.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.

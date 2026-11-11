@@ -55,6 +55,24 @@ def earnings_times(block: dict) -> list[datetime]:
     return out
 
 
+def recent_filings(session: Any, cik: int, since: datetime) -> list[dict]:
+    """Earnings filings accepted since ``since`` (from the recent block only), with a link to the filing folder."""
+    data = _get(session, f"{SUBMISSIONS_URL}CIK{cik:010d}.json")
+    block = data["filings"]["recent"]
+    out = []
+    for form, items, accepted, acc in zip(block.get("form", []), block.get("items", []), block.get("acceptanceDateTime", []),
+                                          block.get("accessionNumber", [])):
+        if form != "8-K" or EARNINGS_ITEM not in str(items).split(","):
+            continue
+        try:
+            when = datetime.fromisoformat(accepted.replace("Z", "+00:00")).astimezone(UTC)
+        except (ValueError, AttributeError):
+            continue
+        if when >= since:
+            out.append({"accepted": when, "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{str(acc).replace('-', '')}/"})
+    return sorted(out, key=lambda d: d["accepted"])
+
+
 def dedupe(times: list[datetime], days: int = DEDUPE_DAYS) -> list[datetime]:
     """Keep the first filing in any cluster: a company often files a second 2.02 within days."""
     out: list[datetime] = []
