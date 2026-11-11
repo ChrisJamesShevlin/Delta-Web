@@ -73,6 +73,19 @@ Run 2 is the same test on the cleaned file (1,252 bars, 2022-01-19 to 2026-11-10
 
 Reading, against the pre-registered rules: n=86 is under the 100-trade minimum, so no conclusion, and the expectancy (+0.03R, SE 0.14) is indistinguishable from zero. In-sample and holdout **disagree in sign** (+0.09 then -0.09). Exits: 34 stops, 24 targets, 26 trend breaks, 1 time, 1 end of data. Run 1 had said +0.11R on 102 trades: the cleaning moved the point estimate by 0.08R, about half a standard error, which is itself an illustration of how much noise a sample this size carries. Conclusion: no evidence of a technical edge, and the data cannot rule one out either.
 
+## Pre-registration: VIX and oil rule test (written 2026-11-11, BEFORE the FRED history was fetched or any result seen)
+
+Question: are the price rules in `ig_swing/context.py` (block new longs on a VIX spike of 10% or more or an oil rise of 3% or more, block new shorts on a VIX fall of 10% or more) supported by history?
+
+- Data: FRED `VIXCLS` and `DCOILWTICO` from 2021-12-01, against the cleaned US 500 bars used in the technical backtest (`data/history/US500_DAY.csv`). Run with `python3 -m ig_swing.rules_test`, once.
+- Method: event study. Trigger = the rule's own threshold on the FRED day-over-day percentage change. First trigger in a cluster only (events at least 5 bars apart). Compare the US 500 forward return from the trigger day's close with the unconditional forward return over all days. Statistic: difference in means over sd(all days)/sqrt(n events), a rough z.
+- Primary read: 5-bar forward return. The 1-bar return is shown as a secondary read and is not used for conclusions.
+- Rule claims: after a VIX spike or an oil spike the forward return is lower than usual, and after a VIX collapse it is higher than usual.
+- Reading: fewer than 30 events is no conclusion. |z| under 2 means the rule is not validated. |z| of 2 or more in the claimed direction supports it. **|z| of 2 or more in the opposite direction means the rule is harmful.** I flag this up front because VIX spikes are often followed by rebounds, so the rules may be the wrong way round. Three primary tests are made, so a z just over 2 is weak evidence.
+- Also reported, descriptively only: how many of the 86 backtest trades each rule would have vetoed, and their mean R. No conclusion is drawn from that count.
+- What happens next: a rule that is contradicted is removed. A rule that is merely not validated stays in as an unvalidated judgement and is labelled so. No threshold is changed after seeing results. One run only, a fresh pre-registration is needed for any variant.
+- Not modelled: the live rule uses IG's intraday move at the time of the plan, this uses the daily close-to-close change.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
