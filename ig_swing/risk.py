@@ -278,6 +278,8 @@ class EntryProposal:
     stop_distance: float
     min_deal_size: float
     min_stop_distance: float
+    size_factor: float = 1.0          # context layer: 0.5 halves the target risk
+    vetoes: tuple[str, ...] = ()      # context layer: each is a reason to refuse
 
 
 @dataclass(frozen=True)
@@ -335,7 +337,10 @@ class RiskEngine:
         if unprotected:
             reasons.append(f"{len(unprotected)} open position(s) have no stop, so total risk is unbounded")
 
-        size = size_position(account.equity, proposal.stop_distance, self.limits, proposal.min_deal_size)
+        reasons += [f"context veto: {v}" for v in proposal.vetoes]
+        factor = proposal.size_factor if 0 < proposal.size_factor <= 1 else 1.0  # context may only shrink size
+        size = size_position(account.equity, proposal.stop_distance, self.limits, proposal.min_deal_size,
+                             risk_pct=self.limits.risk_per_trade_pct * factor)
         if not size.allowed:
             reasons.append(size.reason)
         else:

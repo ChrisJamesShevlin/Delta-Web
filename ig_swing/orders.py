@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
+from .context import ContextVerdict
 from .events import Event
 from .ig_client import OrderRejected, Position
 from .journal import Journal
@@ -57,6 +58,7 @@ class OrderService:
         account: AccountState,
         events: list[Event],
         now: datetime,
+        context: ContextVerdict,
         driver: str = "",
         thesis: str = "",
         invalidation: str = "",
@@ -64,10 +66,13 @@ class OrderService:
         ts = now.isoformat()
         rules = self.client.get_market_rules(epic)
         positions = self.client.get_positions()
-        proposal = EntryProposal(epic, direction, stop_distance, rules.min_deal_size, rules.min_stop_distance)
+        proposal = EntryProposal(epic, direction, stop_distance, rules.min_deal_size, rules.min_stop_distance,
+                                 size_factor=context.size_factor, vetoes=context.vetoes)
+        driver = driver or ",".join(context.drivers)
         decision = self.risk.evaluate_entry(proposal, account, positions, events, now)
         self.journal.record_decision(ts, epic, direction, setup, decision.allowed, decision.size, decision.reasons,
-                                     {"stop_distance": stop_distance, "target_distance": target_distance, "equity": account.equity})
+                                     {"stop_distance": stop_distance, "target_distance": target_distance, "equity": account.equity,
+                                      "size_factor": context.size_factor, "context_notes": list(context.notes)})
         if not decision.allowed:
             return OrderResult(False, "refused by risk rules", decision.reasons)
 
@@ -77,6 +82,7 @@ class OrderService:
             f"{'none' if target_distance is None else f'{target_distance:.1f} pts'}\n"
             f"  risk £{decision.risk_gbp:.2f} ({decision.risk_pct:.1f}% of £{account.equity:.2f}), setup {setup}, env {self.env}\n"
             f"  quote {rules.bid}/{rules.offer}"
+            + "".join(f"\n  context: {n}" for n in context.notes)
         )
         if not self.confirm(text):
             self.journal.record_event(ts, "declined", f"{direction} {epic} declined at confirmation")

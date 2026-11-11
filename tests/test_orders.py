@@ -9,6 +9,8 @@ import pandas as pd
 import pytest
 
 from ig_swing.config import LIVE_TEST, Credentials
+from ig_swing.context import ContextVerdict
+from ig_swing.inputs import CrossAssetInput
 from ig_swing.daily import build_plan, format_plan
 from ig_swing.events import HIGH, Event
 from ig_swing.ig_client import (
@@ -70,7 +72,7 @@ def service(tmp_path, client, answer=True, log=None):
 
 
 ENTRY = dict(epic=EPIC, expiry="DEC-26", market="US 500", direction="BUY", stop_distance=100.0, target_distance=200.0,
-             setup="breakout", account=ACCT, events=[], now=NOW, driver="rates", thesis="t", invalidation="i")
+             setup="breakout", account=ACCT, events=[], now=NOW, context=ContextVerdict("BUY"), driver="rates", thesis="t", invalidation="i")
 
 
 def test_happy_path_places_with_stop_and_journals_the_trade(tmp_path):
@@ -212,11 +214,15 @@ class PlanClient(FakeClient):
         return self.df
 
 
+CALM = [CrossAssetInput("VIX", "v", "TRADEABLE", 0.5, 0.1, None, None), CrossAssetInput("Oil (US crude)", "o", "TRADEABLE", 0.2, 0.1, None, None)]
+
+
 def plan_for(tmp_path, df, equity=30.0, positions=()):
     engine = RiskEngine(LIVE_TEST, KillSwitch(tmp_path / "ks.json"))
     j = Journal(tmp_path / "j.db")
     c = PlanClient(df, equity, positions)
-    p = build_plan(c, j, engine, StrategyParams(), epic=EPIC, account_id="ACC1", env="live", events=[], now=NOW)
+    p = build_plan(c, j, engine, StrategyParams(), epic=EPIC, account_id="ACC1", env="live", events=[], now=NOW,
+                   inputs=CALM, headlines=[])
     return p, j, c
 
 
@@ -241,3 +247,42 @@ def test_plan_refusal_lists_reasons_and_warns_about_unprotected_positions(tmp_pa
     assert not p.decision.allowed
     text = format_plan(p)
     assert "REFUSED" in text and "no stop" in text and "WARNING" in text
+
+
+def test_context_veto_refuses_the_order_before_anyone_is_asked(tmp_path):
+    c = FakeClient()
+    s, j, asked = service(tmp_path, c)
+    r = s.submit_entry(**{**ENTRY, "context": ContextVerdict("BUY", vetoes=("VIX up +12.0% today",))})
+    assert not r.placed and any("context veto" in x for x in r.reasons)
+    assert c.calls == [] and asked == []
+
+
+def test_context_halving_reduces_the_stake_and_driver_is_journalled(tmp_path):
+    c = FakeClient()
+    s, j, asked = service(tmp_path, c)
+    # equity 30, LIVE_TEST target 5% = £1.50. Stop 10 pts: full stake 0.15, halved 0.07.
+    ctx = ContextVerdict("BUY", size_factor=0.5, notes=("3 stress headlines",), drivers=("headline_stress",))
+    r = s.submit_entry(**{**ENTRY, "stop_distance": 10.0, "target_distance": 20.0, "driver": "", "context": ctx})
+    assert r.placed and r.size == 0.07
+    assert "context: 3 stress headlines" in asked[0]
+    assert j.open_trades()[0]["driver"] == "headline_stress"
+
+
+def test_plan_blocks_a_long_when_the_vix_spikes_and_proposes_nothing_without_positions(tmp_path):
+    spike = [CrossAssetInput("VIX", "v", "TRADEABLE", 15.0, 3.0, None, None), CALM[1]]
+    engine = RiskEngine(LIVE_TEST, KillSwitch(tmp_path / "ks.json"))
+    j = Journal(tmp_path / "j.db")
+    c = PlanClient(bars(np.linspace(100, 200, 100)))
+    p = build_plan(c, j, engine, StrategyParams(), epic=EPIC, account_id="ACC1", env="live", events=[], now=NOW,
+                   inputs=spike, headlines=[])
+    assert p.signal.direction == "BUY" and not p.decision.allowed
+    assert any("VIX up" in r for r in p.decision.reasons) and p.reductions == []
+    assert "vix_spike" in str(dict(j.decisions()[0]))      # the driver is on record
+
+
+def test_plan_without_context_data_refuses(tmp_path):
+    engine = RiskEngine(LIVE_TEST, KillSwitch(tmp_path / "ks.json"))
+    j = Journal(tmp_path / "j.db")
+    p = build_plan(PlanClient(bars(np.linspace(100, 200, 100))), j, engine, StrategyParams(), epic=EPIC, account_id="ACC1",
+                   env="live", events=[], now=NOW, inputs=None, headlines=None)
+    assert not p.decision.allowed and any("context not loaded" in r for r in p.decision.reasons)

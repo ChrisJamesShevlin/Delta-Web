@@ -37,6 +37,7 @@ KEYWORDS = (
     "trade war", "s&p", "nasdaq", "dow", "wall street", "stock market", "earnings",
     "oil", "crude", "opec", "gold", "dollar", "ecb", "bank of england", "lagarde",
     "bailey", "sanction",
+    "crash", "plunge", "selloff", "sell-off", "turmoil", "panic", "war",  # stress words, used by ig_swing.context
 )
 # Whole words (plus an optional plural), so "fed" does not match "federation".
 # A leading hyphen also blocks a match, so "trillion-dollar" is not "dollar".
