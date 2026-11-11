@@ -39,6 +39,20 @@ Question: does the technical engine alone (no news layer) earn a positive expect
 - Rules for what happens next: no parameter is changed after seeing results. Any tuning uses the in-sample part only and is then judged once on the holdout, and the number of variants tried must be stated. A result that needs tuning to look good is treated as noise.
 - Not modelled: financing, loss limits, the news and cross-asset layers, slippage beyond overnight gaps.
 
+### Result of the technical backtest (run once on 2026-11-11, settings unchanged, nothing tuned)
+
+1,500 daily bars, 2022-01-19 to 2026-11-11 (4.8 years). The last bar was the unfinished session of 2026-11-11.
+
+| Subset | Trades | Expectancy (R) | SE | Win rate | Max drawdown |
+|---|---|---|---|---|---|
+| All | 102 | +0.11 | 0.13 | 33% | 4.2% |
+| In-sample (to 2025-06-04) | 70 | +0.13 | 0.16 | 34% | 4.2% |
+| Holdout | 32 | +0.07 | 0.22 | 31% | 2.7% |
+| Long only | 68 | +0.21 | 0.17 | 37% | 2.5% |
+| Short only | 34 | -0.08 | 0.22 | 26% | 4.3% |
+
+Reading, against the pre-registered rules: n=102 meets the 100-trade minimum and the expectancy is **indistinguishable from zero** (0.11 is under 1 standard error). In-sample and holdout agree in sign. The long and short difference is within noise and the index roughly doubled over the period, so it is not evidence of anything. Exits: 40 stops, 33 targets, 28 trend breaks, 1 end of data. No evidence of a technical edge on its own, and no evidence against it. Financing, loss limits and the news layers were not modelled. No parameter has been changed.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
