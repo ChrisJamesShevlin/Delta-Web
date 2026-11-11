@@ -4,7 +4,8 @@
   python3 -m ig_swing.manage close --deal-id D1 --reason-type thesis_invalidated --reason "..." [--size 0.01] [--execute]
   python3 -m ig_swing.manage stop  --deal-id D1 (--level L | --breakeven | --distance POINTS) [--execute]
   python3 -m ig_swing.manage limit --deal-id D1 --level L [--execute]
-  python3 -m ig_swing.manage trail [--execute]          the mechanical rule: stop to breakeven at +1R, to +1R at +2R
+  python3 -m ig_swing.manage trailing --deal-id D1 [--execute]   up 1R or more: stop to breakeven and an IG trailing stop (manual steps are printed if IG refuses)
+  python3 -m ig_swing.manage trail [--execute]          the mechanical rule: stop to breakeven at +1R, to +1R at +2R (skips positions IG is trailing)
   python3 -m ig_swing.manage history                    closed trades by exit reason: does cutting early help?
 
 Every changing command is a DRY RUN unless --execute is given AND IG_LIVE_ORDERS=yes is set AND the challenge risk profile is active.
@@ -28,7 +29,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from .ig_client import Position
+from .ig_client import IGError, OrderRejected, Position
 
 UTC = timezone.utc
 REASON_TYPES = ("thesis_invalidated", "new_information", "time", "risk_event", "reversal", "profit_taking", "other")
@@ -71,12 +72,37 @@ def trail_target(pos: Position, r_pts: float | None) -> float | None:
     return new if tighter and valid else None
 
 
+def native_trailing_plan(pos: Position, r_pts: float | None, min_stop: float = 0.0) -> tuple[float, float, float] | None:
+    """When a position is up 1R or more and IG is not yet trailing it: (stop level, trailing distance, step).
+
+    The stop goes to breakeven if that tightens it, and the trailing distance is the gap from the price to that stop, so IG trailing at
+    that distance can never put the stop further away than it is now. None if not up 1R, already trailing, or the gap is too small.
+    """
+    m = move_in_r(pos, r_pts)
+    if m is None or m < 1 or pos.stop_level is None or pos.trailing_distance:
+        return None
+    buy = pos.direction == "BUY"
+    price = pos.bid if buy else pos.offer
+    if price is None:
+        return None
+    stop = max(pos.stop_level, pos.open_level) if buy else min(pos.stop_level, pos.open_level)
+    gap = (price - stop) if buy else (stop - price)
+    if gap <= 0 or gap < min_stop:
+        return None
+    return stop, round(gap, 2), max(round(gap / 5, 2), 1.0)
+
+
+MANUAL_TRAILING = ("IG did not accept a trailing stop through the API. Set it by hand in the IG platform: open the position, edit the stop, choose a TRAILING stop, "
+                   "distance {distance:g} points, step {step:g} points. Tell the assistant when it is done.")
+
+
 def describe(pos: Position, trade: dict | None) -> str:
     r = initial_risk_points(pos, trade)
     m = move_in_r(pos, r)
     price = pos.bid if pos.direction == "BUY" else pos.offer
     stop = "NONE (unprotected!)" if pos.stop_level is None else f"{pos.stop_level:g}"
     limit = "none" if pos.limit_level is None else f"{pos.limit_level:g}"
+    trailing = f", IG trailing {pos.trailing_distance:g} points" if pos.trailing_distance else ""
     risk = ""
     if pos.stop_level is not None:
         stopped = pos.size * (pos.stop_level - pos.open_level if pos.direction == "BUY" else pos.open_level - pos.stop_level)
@@ -84,7 +110,7 @@ def describe(pos: Position, trade: dict | None) -> str:
     pnl = "n/a" if pos.unrealised_pnl is None else f"£{pos.unrealised_pnl:+.2f}"
     thesis = f"\n    thesis: {trade['thesis']}\n    invalidation: {trade.get('invalidation') or 'not recorded'}" if trade and trade.get("thesis") else ""
     return (f"{pos.direction} {pos.instrument_name} [{pos.deal_id}] £{pos.size:g}/pt, opened {pos.open_level:g}, now {price if price is not None else 'n/a'}, "
-            f"P&L {pnl}" + (f", {m:+.2f}R" if m is not None else "") + f", stop {stop}, take-profit {limit}{risk}{thesis}")
+            f"P&L {pnl}" + (f", {m:+.2f}R" if m is not None else "") + f", stop {stop}{trailing}, take-profit {limit}{risk}{thesis}")
 
 
 def history_by_reason(closed: list[dict]) -> dict[str, list[float]]:
@@ -128,6 +154,15 @@ def apply_stop(client: Any, journal: Any, pos: Position, new_stop: float, now: d
     return {"deal_id": pos.deal_id, "from": pos.stop_level, "to": final}
 
 
+def apply_trailing(client: Any, journal: Any, pos: Position, stop: float, distance: float, step: float, now: datetime) -> dict[str, Any]:
+    ref = client.amend_position(position=pos, new_stop=stop if stop != pos.stop_level else None, trailing=(distance, step), user_confirmed=True)
+    conf = client.confirm_deal(ref)
+    final = conf.stop_level if conf.stop_level is not None else stop
+    journal.update_levels(pos.deal_id, stop=final)
+    journal.record_event(now.isoformat(), "trailing_set", json.dumps({"deal_id": pos.deal_id, "stop": final, "distance": distance, "step": step}))
+    return {"deal_id": pos.deal_id, "stop": final, "distance": distance, "step": step}
+
+
 def apply_limit(client: Any, journal: Any, pos: Position, new_limit: float, now: datetime) -> dict[str, Any]:
     ref = client.amend_position(position=pos, new_limit=new_limit, user_confirmed=True)
     client.confirm_deal(ref)
@@ -156,6 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--breakeven", action="store_true")
     g.add_argument("--distance", type=float, help="points from the current price")
     s.add_argument("--execute", action="store_true")
+    tr = sub.add_parser("trailing", help="switch a winning position (up 1R or more) to an IG trailing stop")
+    tr.add_argument("--deal-id", required=True)
+    tr.add_argument("--execute", action="store_true")
     lm = sub.add_parser("limit")
     lm.add_argument("--deal-id", required=True)
     lm.add_argument("--level", type=float, required=True)
@@ -216,6 +254,25 @@ def main(argv: list[str] | None = None) -> int:
             if execute:
                 print("STOP MOVED:", apply_stop(client, journal, pos, new, now, "manual"))
             return 0
+        if args.cmd == "trailing":
+            pos = _find(positions, args.deal_id)
+            tr_ = open_trades.get(pos.deal_id)
+            min_stop = client.get_market_rules(pos.epic).min_stop_distance
+            plan = native_trailing_plan(pos, initial_risk_points(pos, tr_), min_stop)
+            if plan is None:
+                print(f"No trailing stop to set on {describe(pos, tr_)}\n  (it needs to be up at least 1R, not already trailing, and have room above the market minimum)")
+                return 0
+            stop, distance, step = plan
+            print(f"{mode}: trailing stop on {describe(pos, tr_)}\n  stop to {stop:g}, trailing distance {distance:g} points, step {step:g} points")
+            if execute:
+                try:
+                    print("TRAILING SET:", apply_trailing(client, journal, pos, stop, distance, step, now))
+                except (IGError, OrderRejected) as exc:
+                    print(f"NOT SET: {exc}\n" + MANUAL_TRAILING.format(distance=distance, step=step))
+                    return 1
+            else:
+                print("If IG refuses it through the API, the command prints the manual steps instead.")
+            return 0
         if args.cmd == "limit":
             pos = _find(positions, args.deal_id)
             print(f"{mode}: set the take-profit on {describe(pos, open_trades.get(pos.deal_id))}\n  from {pos.limit_level} to {args.level:g}")
@@ -226,6 +283,9 @@ def main(argv: list[str] | None = None) -> int:
             done = 0
             for p in positions:
                 tr = open_trades.get(p.deal_id)
+                if p.trailing_distance:
+                    print(f"{p.instrument_name} [{p.deal_id}]: IG is trailing the stop ({p.trailing_distance:g} points), left alone")
+                    continue
                 new = trail_target(p, initial_risk_points(p, tr))
                 if new is None:
                     print(f"{p.instrument_name} [{p.deal_id}]: no change ({(lambda m: 'n/a' if m is None else f'{m:+.2f}R')(move_in_r(p, initial_risk_points(p, tr)))})")

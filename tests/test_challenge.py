@@ -324,3 +324,36 @@ def test_keywords_match_whole_words_only():
     assert [h.source for h in ch.relevant_headlines(hs, "EUR/USD", macro_padding=False)] == ["c"]            # not Eurasia
     assert [h.source for h in ch.relevant_headlines(hs, "USD/CHF", macro_padding=False)] == ["d"]            # not franchise
     assert ch._has_word("the euros are strong", "euro") and not ch._has_word("eurasia", "eur") and ch._has_word("tariffs rise", "tariff")
+
+
+def test_trailing_stop_scoring_by_hand_and_the_comparison_in_the_report():
+    # long from 11000, stop 100 points (R), spread 2 (half 1). Fixed: target at 11200. Trailing: stop trails 1R behind the best price from +1R.
+    i = idea(horizon_days=4)
+    run_then_reverse = bars([(11000.0, 11110.0, 10995.0, 11100.0),     # +1R reached: trail becomes active, best 11109, stop 11009
+                             (11100.0, 11300.0, 11090.0, 11250.0),     # through the fixed target; best 11299, stop 11199
+                             (11250.0, 11260.0, 11150.0, 11160.0),     # low 11150 hits the trailing stop at 11199
+                             FLAT])
+    t = ch.score_idea_trail(i, run_then_reverse)
+    assert t["reason"] == "trail_stop" and t["exit"] == pytest.approx(11199.0) and t["r"] == pytest.approx(1.99)
+    f = ch.score_idea(i, run_then_reverse)
+    assert f["reason"] == "target" and f["r"] == pytest.approx(2.0)                                  # the fixed target banks 2R, the trail 1.99R here
+    # a trade that reaches +1R then falls back: trailing stops out at about +0.1R, the fixed stop would eventually lose 1R
+    fade = bars([(11000.0, 11110.0, 10995.0, 11100.0), (11100.0, 11105.0, 10990.0, 11000.0), FLAT, FLAT])
+    assert ch.score_idea_trail(i, fade)["reason"] == "trail_stop" and ch.score_idea_trail(i, fade)["r"] == pytest.approx(0.09)
+    # a trade that never gets to +1R is stopped at the original stop, exactly like the fixed version
+    down = bars([(11000.0, 11020.0, 10890.0, 10900.0)])
+    assert ch.score_idea_trail(i, down)["reason"] == "stop" and ch.score_idea_trail(i, down)["r"] == pytest.approx(-1.0)
+    # not finished: still inside the horizon, no exit
+    assert ch.score_idea_trail(i, bars([FLAT, FLAT])) is None
+    m = ch.measure([i], lambda k: run_then_reverse)
+    text = ch.format_report(m)
+    assert "Exit style comparison (the same ideas, n=1)" in text and "fixed stop and target mean +2.00R against a trailing stop from +1R mean +1.99R" in text
+
+
+def test_trailing_scoring_short_side_and_gaps():
+    i = idea(direction="SELL", entry=11000.0, horizon_days=3)                                         # stop 11100, R = 100
+    t = ch.score_idea_trail(i, bars([(11000.0, 11005.0, 10890.0, 10900.0), (10900.0, 10990.0, 10880.0, 10985.0), FLAT]))
+    # day 1: best 10891 (low 10890 + half spread 1), +1R reached, stop 10991. Day 2 high 10990 + 1 = 10991 hits it.
+    assert t["reason"] == "trail_stop" and t["exit"] == pytest.approx(10991.0) and t["r"] == pytest.approx(0.09)
+    gap = ch.score_idea_trail(idea(horizon_days=3), bars([(10800.0, 10810.0, 10790.0, 10800.0)]))     # a long gaps through its stop
+    assert gap["reason"] == "stop_gap" and gap["r"] < -1.0

@@ -92,6 +92,7 @@ class Position:
     bid: float | None
     offer: float | None
     unrealised_pnl: float | None
+    trailing_distance: float | None = None   # points, when IG is trailing the stop for us
 
 
 @dataclass(frozen=True)
@@ -461,6 +462,7 @@ class IGClient:
                     bid=bid,
                     offer=offer,
                     unrealised_pnl=None if pnl is None else round(pnl, 2),
+                    trailing_distance=_num(p.get("trailingStopDistance")),
                 )
             )
         return out
@@ -551,7 +553,8 @@ class IGClient:
             raise IGError(200, None, "close position (no dealReference returned)")
         return str(ref)
 
-    def amend_position(self, *, position: Position, new_stop: float | None = None, new_limit: float | None = None, user_confirmed: bool) -> str:
+    def amend_position(self, *, position: Position, new_stop: float | None = None, new_limit: float | None = None,
+                       trailing: tuple[float, float] | None = None, user_confirmed: bool) -> str:
         """Change a position's stop and/or take-profit level. A stop can stay or tighten, never widen, and can never be removed.
 
         IG clears a level that is left out of the request, so both current levels are always sent.
@@ -574,6 +577,19 @@ class IGClient:
         if limit is not None and not _is_positive(limit):
             raise ValueError("limit must be above zero when given")
         body: dict[str, Any] = {"stopLevel": stop, "trailingStop": False}
+        if trailing is not None:
+            distance, increment = trailing
+            if not (_is_positive(distance) and _is_positive(increment)):
+                raise ValueError("a trailing stop needs a distance and a step above zero")
+            price = position.bid if position.direction == "BUY" else position.offer
+            if price is not None:
+                gap = (price - stop) if position.direction == "BUY" else (stop - price)
+                if distance > gap + 1e-9:
+                    raise ValueError("Amend refused: that trailing distance is wider than the current gap to the stop, so it could widen the stop.")
+            rules = self.get_market_rules(position.epic)
+            if distance < rules.min_stop_distance:
+                raise ValueError(f"trailing distance {distance} is below the market minimum {rules.min_stop_distance}")
+            body.update({"trailingStop": True, "trailingStopDistance": distance, "trailingStopIncrement": increment})
         if limit is not None:
             body["limitLevel"] = limit
         data = self._call("PUT", f"/positions/otc/{position.deal_id}", "2", body=body, context="amend position")

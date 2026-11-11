@@ -171,3 +171,69 @@ def test_journal_update_levels_only_touches_open_trades(tmp_path):
     assert j.update_levels("NOPE", stop=1.0) is False
     j.close_trade(tid, NOW.isoformat(), 11100.0, "target")
     assert j.update_levels("D1", stop=11050.0) is False                                              # already closed
+
+
+# ---- native trailing stops ------------------------------------------------
+
+
+def test_trailing_plan_needs_one_r_and_never_widens():
+    # long from 11000, 100 points of initial risk, now 11100 (+1R) with the stop at 10900: stop to breakeven, trail the 100 point gap
+    plan = mg.native_trailing_plan(pos(bid=11100.0), 100.0, min_stop=10.0)
+    assert plan == (11000.0, 100.0, 20.0)
+    assert mg.native_trailing_plan(pos(bid=11050.0), 100.0) is None                                 # only +0.5R
+    assert mg.native_trailing_plan(pos(bid=11200.0, stop=11100.0), 100.0) == (11100.0, 100.0, 20.0)  # the stop is already tighter: trail from there
+    assert mg.native_trailing_plan(Position("D1", EPIC, "EUR/USD", "BUY", 0.01, 11000.0, 10900.0, 11200.0, 11100.0, 11101.0, 1.0, 100.0), 100.0) is None   # already trailing
+    assert mg.native_trailing_plan(pos(bid=11100.0), 100.0, min_stop=150.0) is None                 # the gap is under the market minimum
+    s = pos("SELL", 11000.0, 11100.0, 10800.0, bid=10899.0, offer=10900.0)
+    assert mg.native_trailing_plan(s, 100.0) == (11000.0, 100.0, 20.0)                              # a short mirrors it
+    assert mg.native_trailing_plan(pos(stop=None, bid=11100.0), 100.0) is None
+
+
+def test_describe_shows_when_ig_is_trailing():
+    p = Position("D1", EPIC, "EUR/USD", "BUY", 0.01, 11000.0, 11000.0, 11200.0, 11100.0, 11101.0, 1.0, 80.0)
+    assert "IG trailing 80 points" in mg.describe(p, None)
+
+
+class TrailClient(FakeClient):
+    def amend_position(self, **kw):
+        self.calls.append(kw)
+        return "REF"
+
+
+def test_apply_trailing_records_the_stop_and_an_event(tmp_path):
+    j = Journal(tmp_path / "j.db")
+    open_trade(j)
+    r = mg.apply_trailing(TrailClient(), j, pos(bid=11100.0), 11000.0, 100.0, 20.0, NOW)
+    assert r == {"deal_id": "D1", "stop": 11000.0, "distance": 100.0, "step": 20.0}
+    assert j.open_trades()[0]["stop"] == 11000.0 and [e["kind"] for e in j.events()] == ["trailing_set"]
+
+
+def test_the_manual_fallback_gives_the_exact_numbers():
+    text = mg.MANUAL_TRAILING.format(distance=100.0, step=20.0)
+    assert "TRAILING stop" in text and "distance 100 points" in text and "step 20 points" in text and "by hand" in text
+
+
+def test_client_sends_the_trailing_fields_and_refuses_a_widening_distance(tmp_path):
+    from ig_swing.ig_client import MarketRules
+
+    class S(Session):
+        def request(self, method, url, headers=None, params=None, json=None, timeout=None):
+            path = url[len("https://demo-api.ig.com/gateway/deal"):]
+            if path.startswith("/markets/"):
+                self.calls.append({"method": method, "path": path, "json": json})
+                return Resp({"instrument": {"name": "EUR/USD", "expiry": "DFB"}, "dealingRules": {"minDealSize": {"value": 0.01}, "minNormalStopOrLimitDistance": {"unit": "POINTS", "value": 4.0}},
+                             "snapshot": {"bid": 11100.0, "offer": 11101.0}})
+            return super().request(method, url, headers, params, json, timeout)
+
+    s = S()
+    c = IGClient(CREDS, session=s, cache=PriceCache(tmp_path))
+    p = pos(bid=11100.0, stop=11000.0)                                                              # a 100 point gap to the stop
+    c.amend_position(position=p, trailing=(100.0, 20.0), user_confirmed=True)
+    body = [x for x in s.calls if x["method"] == "PUT"][-1]["json"]
+    assert body == {"stopLevel": 11000.0, "trailingStop": True, "trailingStopDistance": 100.0, "trailingStopIncrement": 20.0, "limitLevel": 11200.0}
+    with pytest.raises(ValueError):
+        c.amend_position(position=p, trailing=(150.0, 20.0), user_confirmed=True)                    # wider than the gap: could widen the stop
+    with pytest.raises(ValueError):
+        c.amend_position(position=p, trailing=(2.0, 1.0), user_confirmed=True)                       # under the market minimum
+    with pytest.raises(ValueError):
+        c.amend_position(position=p, trailing=(0.0, 1.0), user_confirmed=True)

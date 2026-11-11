@@ -201,6 +201,48 @@ def score_idea(idea: dict, bars: pd.DataFrame) -> dict[str, Any] | None:
     return None
 
 
+def score_idea_trail(idea: dict, bars: pd.DataFrame) -> dict[str, Any] | None:
+    """The same idea with a trailing stop instead of a fixed stop and target: fixed stop until up 1R, then trailing 1R behind the best price.
+
+    No take-profit, so a winner can run until the trail is hit or the horizon ends. Daily bars: the stop for a bar is the one set by the
+    PREVIOUS bars (the trail is updated with a bar's extreme only after it), gaps fill at the open, a stop inside a bar fills at the stop.
+    Returns None until the idea has been stopped out or the horizon is complete.
+    """
+    start = pd.Timestamp(idea["ts"]).tz_convert("UTC").tz_localize(None).normalize()
+    after = bars[pd.to_datetime(bars["timestamp"]) > start].reset_index(drop=True)
+    buy = idea["direction"] == "BUY"
+    entry, r = idea["entry"], idea["stop_pts"]
+    stop = entry - r if buy else entry + r
+    half = idea["spread_pts"] / 2
+    best = entry
+    trailing = False
+    horizon = idea["horizon_days"]
+    for j in range(min(len(after), horizon)):
+        o, h, lo, c = (float(after[k].iloc[j]) for k in ("open", "high", "low", "close"))
+        reason = "trail_stop" if trailing else "stop"
+        if buy:
+            if o - half <= stop:
+                return _result(idea, o - half, reason + "_gap")
+            if lo - half <= stop:
+                return _result(idea, stop, reason)
+            best = max(best, h - half)
+            trailing = trailing or best - entry >= r
+            if trailing:
+                stop = max(stop, best - r)
+        else:
+            if o + half >= stop:
+                return _result(idea, o + half, reason + "_gap")
+            if h + half >= stop:
+                return _result(idea, stop, reason)
+            best = min(best, lo + half)
+            trailing = trailing or entry - best >= r
+            if trailing:
+                stop = min(stop, best + r)
+        if j == horizon - 1:
+            return _result(idea, c - half if buy else c + half, "time")
+    return None
+
+
 def _result(idea: dict, exit_price: float, reason: str) -> dict[str, Any]:
     move = exit_price - idea["entry"] if idea["direction"] == "BUY" else idea["entry"] - exit_price
     return {"id": idea["id"], "exit": float(exit_price), "reason": reason, "pts": float(move), "r": float(move / idea["stop_pts"])}
@@ -233,14 +275,18 @@ def calibration(finished: list[tuple[dict, dict]]) -> dict[str, Any]:
 
 
 def measure(ideas: list[dict], get_bars: Callable[[str], pd.DataFrame]) -> dict[str, Any]:
-    finished, pending = [], 0
+    finished, pending, pairs = [], 0, []
     for idea in ideas:
-        res = score_idea(idea, get_bars(idea.get("epic") or idea["market"]))
+        bars = get_bars(idea.get("epic") or idea["market"])
+        res = score_idea(idea, bars)
         if res is None:
             pending += 1
         else:
             finished.append((idea, res))
-    return {"finished": finished, "pending": pending, "total": len(ideas), "calibration": calibration(finished)}
+        trail = score_idea_trail(idea, bars)
+        if res is not None and trail is not None:
+            pairs.append((idea, res, trail))
+    return {"finished": finished, "pending": pending, "total": len(ideas), "calibration": calibration(finished), "pairs": pairs}
 
 
 def format_report(m: dict[str, Any]) -> str:
@@ -261,6 +307,11 @@ def format_report(m: dict[str, Any]) -> str:
         live = [r["r"] for i, r in fin if i.get("live")]
         if live:
             lines.append(f"  taken live: n={len(live)}, mean {mean_se(live)[0]:+.2f}R")
+    pairs = m.get("pairs") or []
+    if pairs:
+        fx, tr = [r["r"] for _, r, _ in pairs], [t["r"] for _, _, t in pairs]
+        lines.append(f"Exit style comparison (the same ideas, n={len(pairs)}): fixed stop and target mean {mean_se(fx)[0]:+.2f}R against a trailing stop from +1R "
+                     f"mean {mean_se(tr)[0]:+.2f}R" + ("  (under 30: noise)" if len(pairs) < 30 else ""))
     cal = m["calibration"]
     lines.append("Probability check (does the stated chance of winning match what happened?)")
     if cal["n"]:
