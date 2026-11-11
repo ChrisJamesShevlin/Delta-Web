@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +131,19 @@ class Snapshot:
     high: float | None
     low: float | None
     update_time: str | None
+
+
+@dataclass(frozen=True)
+class Account:
+    account_id: str = field(repr=False)
+    balance: float
+    profit_loss: float
+    available: float | None
+
+    @property
+    def equity(self) -> float:
+        """Cash balance plus unrealised profit or loss."""
+        return self.balance + self.profit_loss
 
 
 class PriceCache:
@@ -319,6 +332,19 @@ class IGClient:
             bid=bid,
             offer=offer,
         )
+
+    def get_account(self, account_id: str) -> Account:
+        """Balance, unrealised P&L and available funds for one account. Read-only."""
+        data = self._call("GET", "/accounts", "1", context="accounts")
+        for a in data.get("accounts", []):
+            if a.get("accountId") != account_id:
+                continue
+            bal = a.get("balance") or {}
+            try:
+                return Account(account_id, float(bal["balance"]), float(bal.get("profitLoss") or 0.0), _num(bal.get("available")))
+            except (KeyError, TypeError, ValueError):
+                raise MarketDataError("Account response missing balance") from None
+        raise MarketDataError("Account not found in response")
 
     def get_snapshot(self, epic: str) -> Snapshot:
         """Current price and today's change. Read-only, uses no price allowance."""
