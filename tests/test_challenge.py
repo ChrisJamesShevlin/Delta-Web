@@ -122,17 +122,23 @@ def test_loading_ideas_ignores_other_events_and_garbage():
     assert [i["id"] for i in ch.load_ideas(events)] == [1]
 
 
+def test_every_market_has_a_class_and_the_mix_is_not_just_currencies():
+    assert set(ch.ASSET_CLASS) == set(ch.MARKETS) and set(ch.ASSET_CLASS.values()) == set(ch.CLASS_ORDER)
+    counts = {c: sum(1 for v in ch.ASSET_CLASS.values() if v == c) for c in ch.CLASS_ORDER}
+    assert counts == {"Stock indices": 8, "Metals": 2, "Energy": 3, "Currencies": 10}
+
+
 def test_briefing_text_contains_the_pieces():
     rows = [{"market": "EUR/USD", "price": 11093.3, "day_pct": 0.1, "atr": 60.0, "atr_pct": 0.54, "range_pos": 0.4, "long_pct": 65.0, "stake": 0.07,
              "note": "margin-limited", "spread_pct": 0.008, "sent_id": "EURUSD"}]
     text = ch.format_briefing(NOW, rows, 45.57, 0, ["x: unavailable"], ["  Fri 13 Nov PPI [HIGH]"], ["  09:00 Fed holds"])
-    for needle in ("Equity £45.57", "EUR/USD", "65% long", "£0.07/pt margin-limited", "PPI", "Fed holds", "No order has been placed"):
+    for needle in ("Equity £45.57", "Currencies (1)", "EUR/USD", "65% long", "£0.07/pt margin-limited", "Fits the live account at 10% risk (1): EUR/USD", "Shadow book only", "PPI", "Fed holds", "No order has been placed"):
         assert needle in text
 
 
 def test_constants():
     assert ch.KELLY_FRACTION == 0.125 and ch.CAP_UNTIL_CALIBRATED == 5.0 and ch.CAP_CALIBRATED == 10.0 and ch.CALIBRATION_MIN == 30
-    assert len(ch.MARKETS) == 9
+    assert len(ch.MARKETS) == 23 and len({v[0] for v in ch.MARKETS.values()}) == 23 and all(v[2] > 0 for v in ch.MARKETS.values())
 
 
 def test_research_depth_and_sources_are_recorded_and_validated():
@@ -151,3 +157,38 @@ def test_the_report_splits_results_by_research_depth_and_treats_old_ideas_as_hea
     b = {"EUR/USD": bars([FLAT, (11000.0, 11250.0, 10995.0, 11200.0)])}
     text = ch.format_report(ch.measure([old, deep], lambda m: b[m]))
     assert "research headlines: n=1" in text and "research web: n=1" in text
+
+
+def test_batched_snapshots_and_sentiment_take_one_call_each_and_survive_failure():
+    calls = []
+
+    class C:
+        def _call(self, method, path, version, params=None, context=""):
+            calls.append(path)
+            if path == "/markets":
+                return {"marketDetails": [{"instrument": {"epic": "E1"}, "snapshot": {"bid": 10.0, "offer": 11.0, "percentageChange": 1.5, "netChange": 0.2, "marketStatus": "TRADEABLE"}},
+                                          {"instrument": {"epic": "E2"}, "snapshot": {"bid": None, "offer": None}}]}
+            return {"clientSentiments": [{"marketId": "EURUSD", "longPositionPercentage": 64.0}]}
+
+    snaps = ch.batch_snapshots(C(), ["E1", "E2"])
+    assert list(snaps) == ["E1"] and snaps["E1"].offer == 11.0 and snaps["E1"].pct_change == 1.5
+    assert ch.batch_sentiment(C(), ["EURUSD"]) == {"EURUSD": 64.0}
+    assert calls == ["/markets", "/clientsentiment"]
+
+    class Broken:
+        def _call(self, *a, **k):
+            raise RuntimeError("no")
+
+    assert ch.batch_sentiment(Broken(), ["EURUSD"]) == {}
+
+
+def test_more_than_fifty_markets_are_split_into_batches():
+    calls = []
+
+    class C:
+        def _call(self, method, path, version, params=None, context=""):
+            calls.append(len(params["epics"].split(",")))
+            return {"marketDetails": []}
+
+    ch.batch_snapshots(C(), [f"E{i}" for i in range(120)])
+    assert calls == [50, 50, 20]

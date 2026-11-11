@@ -29,19 +29,41 @@ import pandas as pd
 UTC = timezone.utc
 KIND = "challenge_idea"
 
-# name -> (daily-bet epic, IG client sentiment id, margin %). Margins for gold, crude and the FX pairs other than
-# EUR/USD and GBP/USD are assumed from the futures equivalents.
+# name -> (daily-bet epic, IG client sentiment id, margin %). Epics, sentiment ids, margins and minimum stakes (all 0.01 a point)
+# were read from IG's batch market call on 2026-11-11. The list is a starting set of liquid markets with spreads under about 0.05%
+# (the Hong Kong indices at 0.15% and above and copper at 0.2% and above were left out for cost).
 MARKETS: dict[str, tuple[str, str, float]] = {
     "EUR/USD": ("CS.D.EURUSD.TODAY.IP", "EURUSD", 3.33),
     "GBP/USD": ("CS.D.GBPUSD.TODAY.IP", "GBPUSD", 3.33),
     "USD/JPY": ("CS.D.USDJPY.TODAY.IP", "USDJPY", 3.33),
-    "AUD/USD": ("CS.D.AUDUSD.TODAY.IP", "AUDUSD", 3.33),
+    "AUD/USD": ("CS.D.AUDUSD.TODAY.IP", "AUDUSD", 5.0),
+    "EUR/GBP": ("CS.D.EURGBP.TODAY.IP", "EURGBP", 3.33),
+    "USD/CAD": ("CS.D.USDCAD.TODAY.IP", "USDCAD", 3.33),
+    "USD/CHF": ("CS.D.USDCHF.TODAY.IP", "USDCHF", 3.33),
+    "NZD/USD": ("CS.D.NZDUSD.TODAY.IP", "NZDUSD", 5.0),
+    "GBP/JPY": ("CS.D.GBPJPY.TODAY.IP", "GBPJPY", 3.33),
+    "EUR/JPY": ("CS.D.EURJPY.TODAY.IP", "EURJPY", 3.33),
     "Gold": ("CS.D.USCGC.TODAY.IP", "GC", 5.0),
+    "Silver": ("CS.D.USCSI.TODAY.IP", "SI", 10.0),
     "Crude oil": ("CC.D.CL.USS.IP", "CL", 10.0),
+    "Brent crude": ("CC.D.LCO.USS.IP", "LCO", 10.0),
+    "Natural gas": ("CC.D.NG.USS.IP", "NG", 10.0),
     "US Tech 100": ("IX.D.NASDAQ.CASH.IP", "USTECH", 5.0),
     "US 500": ("IX.D.SPTRD.DAILY.IP", "US500", 5.0),
+    "Wall Street": ("IX.D.DOW.DAILY.IP", "WALL", 5.0),
+    "US Russell 2000": ("IX.D.RUSSELL.DAILY.IP", "R2000", 10.0),
     "Germany 40": ("IX.D.DAX.DAILY.IP", "DE30", 5.0),
+    "FTSE 100": ("IX.D.FTSE.DAILY.IP", "FT100", 5.0),
+    "France 40": ("IX.D.CAC.DAILY.IP", "FR40", 5.0),
+    "Japan 225": ("IX.D.NIKKEI.DAILY.IP", "JP225", 5.0),
 }
+ASSET_CLASS: dict[str, str] = {
+    **{m: "Currencies" for m in ("EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "EUR/GBP", "USD/CAD", "USD/CHF", "NZD/USD", "GBP/JPY", "EUR/JPY")},
+    **{m: "Metals" for m in ("Gold", "Silver")},
+    **{m: "Energy" for m in ("Crude oil", "Brent crude", "Natural gas")},
+    **{m: "Stock indices" for m in ("US Tech 100", "US 500", "Wall Street", "US Russell 2000", "Germany 40", "FTSE 100", "France 40", "Japan 225")},
+}
+CLASS_ORDER = ("Stock indices", "Metals", "Energy", "Currencies")
 PLAYBOOKS = ("event_reaction", "news_thesis", "earnings", "trend", "sentiment", "other")
 RESEARCH_LEVELS = ("none", "headlines", "web")          # how much reading went into the idea, so the report can test whether it helps
 MAX_SOURCES = 6
@@ -244,12 +266,22 @@ def stake_hint(equity: float, risk_pct: float, stop_pts: float, price: float, ma
 
 def format_briefing(now: datetime, rows: list[dict], equity: float, positions: int, notes: list[str], events_text: list[str], headlines_text: list[str]) -> str:
     lines = [f"Challenge briefing, {now:%a %d %b %Y %H:%M} UTC. Equity £{equity:.2f}, open positions {positions}", ""]
-    lines.append(f"{'market':12} {'price':>9} {'day':>7} {'ATR pts':>8} {'ATR %':>6} {'20d range':>9} {'IG clients':>11} {'spread':>7}  stake for a 1.5 ATR stop at 10% risk")
-    for r in rows:
-        stake = f"£{r['stake']:.2f}/pt {r['note']}".strip() if r["stake"] else r["note"]
-        sent = "n/a" if r["long_pct"] is None else f"{r['long_pct']:.0f}% long"
-        pos = "n/a" if r["range_pos"] is None else f"{r['range_pos'] * 100:.0f}%"
-        lines.append(f"{r['market']:12} {r['price']:>9.1f} {r['day_pct']:>+6.2f}% {r['atr']:>8.1f} {r['atr_pct']:>5.2f}% {pos:>9} {sent:>11} {r['spread_pct']:>6.3f}%  {stake}")
+    header = f"{'market':16} {'price':>9} {'day':>7} {'ATR pts':>8} {'ATR %':>6} {'20d range':>9} {'IG clients':>11} {'spread':>7}  stake for a 1.5 ATR stop at 10% risk"
+    for cls in CLASS_ORDER:
+        group = [r for r in rows if ASSET_CLASS.get(r["market"]) == cls]
+        if not group:
+            continue
+        lines += [f"{cls} ({len(group)})", header]
+        for r in group:
+            stake = f"£{r['stake']:.2f}/pt {r['note']}".strip() if r["stake"] else r["note"]
+            sent = "n/a" if r["long_pct"] is None else f"{r['long_pct']:.0f}% long"
+            pos = "n/a" if r["range_pos"] is None else f"{r['range_pos'] * 100:.0f}%"
+            lines.append(f"{r['market']:16} {r['price']:>9.1f} {r['day_pct']:>+6.2f}% {r['atr']:>8.1f} {r['atr_pct']:>5.2f}% {pos:>9} {sent:>11} {r['spread_pct']:>6.3f}%  {stake}")
+        lines.append("")
+    fits = [r["market"] for r in rows if r["stake"]]
+    shadow = [r["market"] for r in rows if not r["stake"]]
+    lines.append(f"Fits the live account at 10% risk ({len(fits)}): " + (", ".join(fits) or "none"))
+    lines.append(f"Shadow book only at this account size ({len(shadow)}): " + (", ".join(shadow) or "none"))
     lines += ["", "Events, next 48 hours:"] + (events_text or ["  none found"])
     lines += ["", "Headlines:"] + (headlines_text or ["  none found"])
     if notes:
@@ -269,6 +301,20 @@ MARKET_KEYWORDS: dict[str, tuple[str, ...]] = {
     "US Tech 100": ("nasdaq", "tech", "nvidia", "chip", " ai ", "apple", "microsoft", "fed", "earnings"),
     "US 500": ("s&p", "wall street", "stocks", "stock market", "fed", "earnings", "dow"),
     "Germany 40": ("dax", "germany", "ecb", "euro", "europe", "german"),
+    "EUR/GBP": ("euro", "pound", "sterling", "ecb", "bank of england", "eur", "gbp"),
+    "USD/CAD": ("canad", "loonie", "boc", "oil", "dollar", "fed"),
+    "USD/CHF": ("swiss", "franc", "snb", "dollar", "fed", "safe haven"),
+    "NZD/USD": ("new zealand", "kiwi", "rbnz", "dollar", "china"),
+    "GBP/JPY": ("pound", "sterling", "yen", "boj", "bank of england"),
+    "EUR/JPY": ("euro", "yen", "ecb", "boj"),
+    "Silver": ("silver", "gold", "dollar", "fed", "industrial", "bullion"),
+    "Brent crude": ("brent", "oil", "opec", "iran", "crude", "energy"),
+    "Natural gas": ("natural gas", "lng", "weather", "storage", "energy", "europe"),
+    "Wall Street": ("dow", "wall street", "stocks", "fed", "earnings"),
+    "US Russell 2000": ("russell", "small cap", "small-cap", "fed", "stocks"),
+    "FTSE 100": ("ftse", "uk ", "london", "bank of england", "britain"),
+    "France 40": ("cac", "france", "french", "euro", "ecb"),
+    "Japan 225": ("nikkei", "japan", "yen", "boj"),
 }
 MACRO_WORDS = ("fed", "fomc", "cpi", "inflation", "jobs", "payroll", "tariff", "rate", "recession", "war", "strike", "sanction")
 
@@ -318,12 +364,44 @@ def format_quick(name: str, snap: dict, atr_pts: float, hourly: pd.DataFrame | N
     return "\n".join(lines)
 
 
+def batch_snapshots(client: Any, epics: list[str]) -> dict[str, Any]:
+    """One IG call for up to 50 markets. Returns epic -> an object with bid, offer, pct_change, net_change, status."""
+    from types import SimpleNamespace
+
+    out: dict[str, Any] = {}
+    for k in range(0, len(epics), 50):
+        d = client._call("GET", "/markets", "2", params={"epics": ",".join(epics[k:k + 50]), "filter": "ALL"}, context="batch markets")
+        for m in d.get("marketDetails", []):
+            s = m.get("snapshot", {})
+            if s.get("bid") is None or s.get("offer") is None:
+                continue
+            out[m["instrument"]["epic"]] = SimpleNamespace(bid=float(s["bid"]), offer=float(s["offer"]), pct_change=s.get("percentageChange"),
+                                                           net_change=s.get("netChange"), status=s.get("marketStatus"))
+    return out
+
+
+def batch_sentiment(client: Any, ids: list[str]) -> dict[str, float]:
+    """One IG call for the share of clients that are long, by sentiment id. Empty on any failure."""
+    try:
+        r = client._call("GET", "/clientsentiment", "1", params={"marketIds": ",".join(ids)}, context="client sentiment")
+        return {x["marketId"]: float(x["longPositionPercentage"]) for x in r.get("clientSentiments", [])}
+    except Exception:
+        return {}
+
+
 def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.DataFrame, datetime], pd.DataFrame]) -> tuple[list[dict], list[str]]:
     from .indicators import atr
     rows, notes = [], []
+    try:
+        snaps = batch_snapshots(client, [v[0] for v in MARKETS.values()])
+    except Exception as exc:  # type name only
+        return [], [f"markets: unavailable ({type(exc).__name__})"]
     for name, (epic, sent_id, margin) in MARKETS.items():
         try:
-            snap = client.get_snapshot(epic)
+            snap = snaps.get(epic)
+            if snap is None:
+                notes.append(f"{name}: no quote")
+                continue
             bars = clean(client.get_prices(epic, "DAY", 30), now)
             price = (snap.bid + snap.offer) / 2
             a = float(atr(bars, 14).iloc[-1])
@@ -369,7 +447,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         env = ig_env()
         creds = load_credentials(env)
-        client = IGClient(creds, base_url=base_url(env), allow_live=(env == "live"))
+        from .ig_client import PriceCache
+
+        client = IGClient(creds, base_url=base_url(env), allow_live=(env == "live"), cache=PriceCache(ttl_seconds=20 * 3600))
         if args.cmd == "idea":
             epic = MARKETS[args.market][0]
             snap = client.get_snapshot(epic)
@@ -436,12 +516,9 @@ def main(argv: list[str] | None = None) -> int:
         acct = client.get_account(creds.account_id)
         rows, notes = build_rows(client, acct.equity, now, clean_daily)
         session = requests.Session()
+        sentiment = batch_sentiment(client, [r["sent_id"] for r in rows])
         for r in rows:
-            try:
-                s = client._call("GET", "/clientsentiment", "1", params={"marketIds": r["sent_id"]}, context="client sentiment")
-                r["long_pct"] = float(s["clientSentiments"][0]["longPositionPercentage"])
-            except Exception:
-                pass
+            r["long_pct"] = sentiment.get(r["sent_id"])
         events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
         heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 10)
         ev_text = format_events(events)
