@@ -8,29 +8,47 @@ verified live 2026-11-11). Writes data/history/US500_DAY.csv (data/ is gitignore
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from .bars import clean_daily
 
 HISTORY_EPIC = "IX.D.SPTRD.DAILY.IP"  # continuous daily funded bet: long history, no roll gaps
 DEFAULT_PATH = Path("data/history/US500_DAY.csv")
 COLUMNS = ["timestamp", "open", "high", "low", "close"]
 
 
-def fetch_history(client: Any, bars: int, path: str | Path = DEFAULT_PATH, epic: str = HISTORY_EPIC) -> pd.DataFrame:
-    df = client.get_prices(epic, "DAY", bars)[COLUMNS]
-    df = df.dropna().drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
+def _save(df: pd.DataFrame, path: str | Path) -> pd.DataFrame:
+    df = df[COLUMNS].dropna().drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(p, index=False)
     return df
 
 
+def fetch_history(client: Any, bars: int, path: str | Path = DEFAULT_PATH, epic: str = HISTORY_EPIC, now: datetime | None = None) -> pd.DataFrame:
+    """Pull, clean (Sunday mini-sessions merged, unfinished bar dropped) and save."""
+    raw = client.get_prices(epic, "DAY", bars)[COLUMNS]
+    return _save(clean_daily(raw, now or datetime.now(timezone.utc)), path)
+
+
+def clean_file(path: str | Path = DEFAULT_PATH, now: datetime | None = None) -> pd.DataFrame:
+    """Clean a raw file already on disk, with no new price pull."""
+    return _save(clean_daily(pd.read_csv(path, parse_dates=["timestamp"]), now or datetime.now(timezone.utc)), path)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--bars", type=int, default=1500)
+    ap.add_argument("--clean-only", action="store_true", help="clean the file on disk, no price pull")
     args = ap.parse_args(argv)
+    if args.clean_only:
+        df = clean_file()
+        print(f"{len(df)} clean bars, {df['timestamp'].iloc[0]:%Y-%m-%d} to {df['timestamp'].iloc[-1]:%Y-%m-%d}, saved to {DEFAULT_PATH}")
+        return 0
     from .config import base_url, ig_env, load_credentials
     from .ig_client import IGClient
 

@@ -17,6 +17,7 @@ from typing import Any
 
 import pandas as pd
 
+from .bars import assert_clean
 from .backtest import BTrade, load_bars_csv, run_backtest
 from .config import AGREED
 from .history import DEFAULT_PATH
@@ -40,6 +41,7 @@ def stats_for(trades: list[BTrade], start_equity: float) -> Stats:
 def run_fixed(df: pd.DataFrame) -> dict[str, Any]:
     df = df.copy()
     df["timestamp"] = pd.to_datetime(df["timestamp"])
+    assert_clean(df)
     result = run_backtest(df, **FIXED)
     cut = split_timestamp(df)
     eq = FIXED["start_equity"]

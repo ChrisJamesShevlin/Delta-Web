@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from .bars import clean_daily
 from .context import ContextVerdict, assess, plan_context_reductions, view_stance
 from .events import Event
 from .ig_client import Position
@@ -95,7 +96,7 @@ def build_plan(
         journal.record_event(ts, "reduction_proposed", f"{r.deal_id}: close {r.close_size}: {r.reason}")
 
     # History can come from a different epic (the continuous daily funded bet) than the one traded.
-    df = client.get_prices(history_epic or epic, "DAY", bars)
+    df = clean_daily(client.get_prices(history_epic or epic, "DAY", bars), now)
     if len(df) < strat.min_bars:
         why = f"insufficient history: {len(df)} of {strat.min_bars} bars"
         notes.append(why)

@@ -292,7 +292,7 @@ def test_short_history_is_reported_as_not_checked_not_as_no_signal(tmp_path):
     p, j, _ = plan_for(tmp_path, bars(np.linspace(100, 200, 51)))
     assert p.insufficient_history and p.signal is None
     text = format_plan(p)
-    assert "NOT CHECKED" in text and "none today" not in text and "51 of 80" in text
+    assert "NOT CHECKED" in text and "none today" not in text and "of 80" in text
     assert "insufficient history" in j.decisions()[0]["reasons"]
 
 

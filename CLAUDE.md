@@ -53,6 +53,12 @@ Question: does the technical engine alone (no news layer) earn a positive expect
 
 Reading, against the pre-registered rules: n=102 meets the 100-trade minimum and the expectancy is **indistinguishable from zero** (0.11 is under 1 standard error). In-sample and holdout agree in sign. The long and short difference is within noise and the index roughly doubled over the period, so it is not evidence of anything. Exits: 40 stops, 33 targets, 28 trend breaks, 1 end of data. No evidence of a technical edge on its own, and no evidence against it. Financing, loss limits and the news layers were not modelled. No parameter has been changed.
 
+### Data defect found after run 1, and the pre-registration of run 2 (2026-11-11, written before run 2)
+
+After run 1 was reported, I found that IG stamps bars by UTC date, so the roughly 2-hour Sunday-evening session arrives as its own bar: 247 of the 1,500 bars (16%), mean range 15.7 points against about 75 for a normal day. Those bars distorted the ATR, the 20-day breakout and the EMAs, so **run 1 was run on flawed data and its numbers should not be relied on.** It stays on record above. The last bar was also an unfinished session. The fix is `ig_swing/bars.py`: Sunday bars are merged into the next trading day, and any bar dated today or later is dropped. It is applied to the history file, the daily plan and the runner, which now refuses unclean data.
+
+Run 2 is the same test on the cleaned file (1,252 bars, 2022-01-19 to 2026-11-10): same `FIXED` settings, same 70/30 split, same reading rules, nothing tuned. Honest disclosure: the data fix was prompted after seeing run 1 (it was found by checking the data, not chosen for its effect on the result), and run 2 is the second look at this data. **Two runs have been made. Run 2 supersedes run 1 for conclusions. No further runs, and no parameter changes, are allowed on this data without a new pre-registration.**
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.

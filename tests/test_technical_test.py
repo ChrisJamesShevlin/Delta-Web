@@ -12,7 +12,7 @@ from ig_swing.history import COLUMNS, fetch_history
 def series(n=600, seed=3):
     rng = np.random.default_rng(seed)
     c = 1000 + np.cumsum(rng.normal(1.0, 8.0, n))
-    return pd.DataFrame({"timestamp": pd.date_range("2022-01-01", periods=n), "open": np.r_[c[0], c[:-1]],
+    return pd.DataFrame({"timestamp": pd.bdate_range("2022-01-03", periods=n), "open": np.r_[c[0], c[:-1]],
                          "high": c + 4, "low": c - 4, "close": c})
 
 
@@ -26,10 +26,11 @@ class FakeClient:
 
 
 def test_fetch_history_saves_clean_csv_with_expected_columns(tmp_path):
+    from datetime import datetime, timezone
     messy = pd.concat([series(50), series(50).iloc[:5]])               # duplicates in
     path = tmp_path / "h" / "x.csv"
     c = FakeClient(messy)
-    df = fetch_history(c, 1500, path)
+    df = fetch_history(c, 1500, path, now=datetime(2030, 1, 1, tzinfo=timezone.utc))
     assert c.calls == [("IX.D.SPTRD.DAILY.IP", "DAY", 1500)]
     assert list(df.columns) == COLUMNS and len(df) == 50 and df["timestamp"].is_monotonic_increasing
     assert list(pd.read_csv(path).columns) == COLUMNS
@@ -46,9 +47,17 @@ def test_split_partitions_every_trade_exactly_once():
     assert s["All trades"].n > 0
     assert s["In-sample (first 70% of bars)"].n + s["Holdout (last 30% of bars)"].n == s["All trades"].n
     assert s["Long only"].n + s["Short only"].n == s["All trades"].n
-    assert out["cut"] == out["first"] + pd.Timedelta(days=int(600 * 0.7) - 1)
+    assert out["cut"] == series()["timestamp"].iloc[int(600 * 0.7) - 1]
 
 
 def test_report_states_sample_size_and_refuses_a_small_sample_conclusion():
     text = tt.format_test(tt.run_fixed(series()))
     assert "Pre-registered" in text and "Holdout" in text and "n=" in text and "Parameters were not tuned" in text
+
+
+def test_runner_refuses_bars_that_still_contain_sunday_sessions():
+    import pytest
+    raw = series().copy()
+    raw["timestamp"] = pd.date_range("2022-01-02", periods=600)        # includes Sundays
+    with pytest.raises(ValueError, match="Sunday"):
+        tt.run_fixed(raw)
