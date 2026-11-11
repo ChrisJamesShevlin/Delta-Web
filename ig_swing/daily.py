@@ -24,6 +24,7 @@ from .strategy import Signal, StrategyParams, generate_signal
 
 UTC = timezone.utc
 BARS = 120
+HISTORY_EPIC = "IX.D.SPTRD.DAILY.IP"  # continuous daily funded bet: long history, no roll gaps
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class Plan:
     notes: list[str] = field(default_factory=list)
     context: ContextVerdict | None = None
     reductions: list[ReductionProposal] = field(default_factory=list)
+    insufficient_history: bool = False
 
 
 def build_plan(
@@ -51,6 +53,7 @@ def build_plan(
     inputs: list[CrossAssetInput] | None,
     headlines: list[Headline] | None,
     bars: int = BARS,
+    history_epic: str | None = None,
 ) -> Plan:
     notes: list[str] = []
     ts = now.isoformat()
@@ -74,7 +77,13 @@ def build_plan(
     for r in reductions:
         journal.record_event(ts, "reduction_proposed", f"{r.deal_id}: close {r.close_size}: {r.reason}")
 
-    df = client.get_prices(epic, "DAY", bars)
+    # History can come from a different epic (the continuous daily funded bet) than the one traded.
+    df = client.get_prices(history_epic or epic, "DAY", bars)
+    if len(df) < strat.min_bars:
+        why = f"insufficient history: {len(df)} of {strat.min_bars} bars"
+        notes.append(why)
+        journal.record_decision(ts, epic, None, None, False, 0.0, [why], {"equity": equity, "bars": len(df)})
+        return Plan(None, None, account, positions, notes, None, reductions, insufficient_history=True)
     signal = generate_signal(df, strat)
     if signal is None:
         journal.record_decision(ts, epic, None, None, False, 0.0, ["no signal"], {"equity": equity, "bars": len(df)})
@@ -96,7 +105,9 @@ def format_plan(plan: Plan) -> str:
     lines = [f"Equity £{a.equity:.2f} (start of day £{a.start_of_day_equity:.2f}, start of week £{a.start_of_week_equity:.2f})",
              f"Open positions: {len(plan.positions)}"]
     lines += [f"  {n}" for n in plan.notes]
-    if plan.signal is None:
+    if plan.insufficient_history:
+        lines.append("Signal: NOT CHECKED (not enough price history).")
+    elif plan.signal is None:
         lines.append("Signal: none today.")
     else:
         s = plan.signal
@@ -139,7 +150,8 @@ def main() -> int:
         headlines, news_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now)
         event_notes = event_notes + input_notes + news_notes
         plan = build_plan(client, Journal(), engine, StrategyParams(), epic=epic, account_id=creds.account_id,
-                          env=env, events=events, now=now, inputs=inputs, headlines=headlines)
+                          env=env, events=events, now=now, inputs=inputs, headlines=headlines,
+                          history_epic=HISTORY_EPIC)
     except Exception as exc:  # type name only: messages can carry sensitive detail
         print(f"FAILED: {type(exc).__name__}")
         return 1

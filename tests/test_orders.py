@@ -286,3 +286,25 @@ def test_plan_without_context_data_refuses(tmp_path):
     p = build_plan(PlanClient(bars(np.linspace(100, 200, 100))), j, engine, StrategyParams(), epic=EPIC, account_id="ACC1",
                    env="live", events=[], now=NOW, inputs=None, headlines=None)
     assert not p.decision.allowed and any("context not loaded" in r for r in p.decision.reasons)
+
+
+def test_short_history_is_reported_as_not_checked_not_as_no_signal(tmp_path):
+    p, j, _ = plan_for(tmp_path, bars(np.linspace(100, 200, 51)))
+    assert p.insufficient_history and p.signal is None
+    text = format_plan(p)
+    assert "NOT CHECKED" in text and "none today" not in text and "51 of 80" in text
+    assert "insufficient history" in j.decisions()[0]["reasons"]
+
+
+def test_history_can_come_from_a_different_epic(tmp_path):
+    seen = []
+
+    class C(PlanClient):
+        def get_prices(self, epic, resolution, n):
+            seen.append(epic)
+            return self.df
+
+    engine = RiskEngine(LIVE_TEST, KillSwitch(tmp_path / "ks.json"))
+    build_plan(C(bars([100.0] * 100)), Journal(tmp_path / "j.db"), engine, StrategyParams(), epic=EPIC, account_id="A", env="live",
+               events=[], now=NOW, inputs=CALM, headlines=[], history_epic="HIST")
+    assert seen == ["HIST"]
