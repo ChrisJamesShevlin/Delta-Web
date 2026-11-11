@@ -26,7 +26,9 @@ split results by them):
 - Missing VIX or oil data vetoes every entry: we cannot confirm the backdrop.
 
 Thresholds are starting points, not tuned values. Changing them after seeing
-results moves the goalposts.
+results moves the goalposts. Tested 2026-11-11 on FRED history (see CLAUDE.md and
+ig_swing/rules_test.py): the three price rules are NOT validated, and none is
+contradicted. They stay in as unvalidated judgements.
 
 Limits: the stress-word count is keyword matching, so it is noisy. The news view is
 a judgement by the assistant in a session, not a measured signal, and its value is

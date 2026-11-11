@@ -86,6 +86,18 @@ Question: are the price rules in `ig_swing/context.py` (block new longs on a VIX
 - What happens next: a rule that is contradicted is removed. A rule that is merely not validated stays in as an unvalidated judgement and is labelled so. No threshold is changed after seeing results. One run only, a fresh pre-registration is needed for any variant.
 - Not modelled: the live rule uses IG's intraday move at the time of the plan, this uses the daily close-to-close change.
 
+### Result of the VIX and oil rule test (run once on 2026-11-11, nothing changed)
+
+US 500 bars 2022-01-19 to 2026-11-10. Primary read: 5-bar forward return after the first trigger in a cluster, against 5-bar returns over all days (mean +0.24%, a rising market).
+
+| Rule | Events | Forward return after trigger | Difference | z | Reading |
+|---|---|---|---|---|---|
+| VIX spike (+10%), expects lower | 68 | -0.02% | -0.25% | -0.94 | not validated |
+| VIX collapse (-10%), expects higher | 41 | +0.52% | +0.28% | +0.82 | not validated |
+| Oil spike (+3%), expects lower | 73 | -0.02% | -0.25% | -0.98 | not validated |
+
+All three differences point the way the rules claim, but none is near |z| 2, so none is supported and none is contradicted. The secondary 1-bar read for the VIX spike points the other way (+0.16%, z +1.52), the rebound pattern, and was not used for conclusions. Descriptive only: the rules would have vetoed 0, 3 and 5 of the 86 backtest trades, far too few to say anything. Under the pre-registered rules, all three stay in as **unvalidated judgements**, labelled as such, with no thresholds changed. The rules are cheap insurance on a small account, not a demonstrated edge.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
