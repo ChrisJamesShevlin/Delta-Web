@@ -1,7 +1,8 @@
 """Low-level IG REST client (demo only).
 
 Safety properties, enforced here:
-- Demo base URL only. Passing the live URL raises.
+- Demo by default. The live URL raises unless allow_live=True, and live order
+  placement or closing raises unless live_orders_enabled=True as well.
 - No order without a stop: ``stop_distance`` is a required keyword and must be
   a finite number above zero and at least the market's minimum stop distance.
 - No order or close without ``user_confirmed=True`` from the caller.
@@ -25,7 +26,7 @@ from typing import Any
 import pandas as pd
 import requests
 
-from .config import DEMO_BASE_URL, Credentials
+from .config import DEMO_BASE_URL, LIVE_BASE_URL, Credentials
 
 TIMEOUT_SECONDS = 30
 INVALID_TOKEN_CODE = "error.security.client-token-invalid"
@@ -175,11 +176,18 @@ class IGClient:
         credentials: Credentials,
         *,
         base_url: str = DEMO_BASE_URL,
+        allow_live: bool = False,
+        live_orders_enabled: bool = False,
         session: Any = None,
         cache: PriceCache | None = None,
     ):
-        if base_url != DEMO_BASE_URL:
-            raise ValueError("Live trading is disabled. Demo only until the user approves a change.")
+        if base_url == LIVE_BASE_URL:
+            if allow_live is not True:
+                raise ValueError("Live is disabled. It needs allow_live=True, a deliberate user-approved choice.")
+        elif base_url != DEMO_BASE_URL:
+            raise ValueError("Unknown IG base URL.")
+        self._is_live = base_url == LIVE_BASE_URL
+        self._live_orders_enabled = live_orders_enabled is True
         self._creds = credentials
         self._base = base_url
         self._session = session or requests.Session()
@@ -367,6 +375,10 @@ class IGClient:
 
     # ---- orders ----------------------------------------------------------
 
+    def _require_orders_allowed(self, what: str) -> None:
+        if self._is_live and not self._live_orders_enabled:
+            raise PermissionError(f"{what} refused: live order placement is not enabled.")
+
     def place_market_order(
         self,
         *,
@@ -382,6 +394,7 @@ class IGClient:
         """Open a position with a mandatory stop. Returns the deal reference."""
         if user_confirmed is not True:
             raise PermissionError("Order refused: the user has not confirmed it.")
+        self._require_orders_allowed("Order")
         if direction not in ("BUY", "SELL"):
             raise ValueError("direction must be BUY or SELL")
         if not _is_positive(stop_distance):
@@ -427,6 +440,7 @@ class IGClient:
         """Close one position by deal id. ``direction`` is the OPEN position's direction."""
         if user_confirmed is not True:
             raise PermissionError("Close refused: the user has not confirmed it.")
+        self._require_orders_allowed("Close")
         if direction not in ("BUY", "SELL"):
             raise ValueError("direction must be BUY or SELL")
         if not _is_positive(size):

@@ -1,9 +1,9 @@
-"""Read-only smoke test against the IG DEMO API.
+"""Read-only smoke test against IG (demo by default; live if IG_ENV=live).
 
 Run from the repo root:  python3 -m ig_swing.smoke_test [EPIC]
 
 Does: login, market rules, 60 daily bars, open positions.
-Never: places, amends or closes anything. Prints no tokens, account ids or
+Never: places, amends or closes anything, even on live. Prints no tokens, account ids or
 deal ids. Uses 60 price points from the weekly historical-data allowance
 (skipped if a cached copy is under 6 hours old).
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sys
 
-from .config import RISK, base_url, load_credentials
+from .config import base_url, ig_env, load_credentials, risk_limits
 from .ig_client import IGClient
 
 DEFAULT_EPIC = "IX.D.SPTRD.DAILY.IP"  # US 500 daily funded bet
@@ -21,11 +21,13 @@ BARS = 60
 
 def main(argv: list[str]) -> int:
     epic = argv[1] if len(argv) > 1 else DEFAULT_EPIC
-    print(f"Base URL: {base_url()}  (demo only)")
-    print(f"Risk limits loaded: {RISK.risk_per_trade_pct}% per trade, max {RISK.max_open_positions} open")
-
     try:
-        client = IGClient(load_credentials())
+        env = ig_env()
+        limits = risk_limits(env)
+        print(f"Environment: {env.upper()}" + ("  (REAL ACCOUNT, read-only run)" if env == "live" else ""))
+        print(f"Risk profile: {limits.name}, cap {limits.max_risk_per_trade_pct}% per trade, max {limits.max_open_positions} open")
+
+        client = IGClient(load_credentials(env), base_url=base_url(env), allow_live=(env == "live"))
         client.login()
         print("1. Login: OK")
 

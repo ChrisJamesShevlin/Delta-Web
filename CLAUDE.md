@@ -40,6 +40,15 @@ Start with a few liquid markets the user knows (for example one or two indices, 
 3. Maximum drawdown on the demo must stay inside the risk limits below.
 4. Go live only at the minimum stake, only if 1 to 3 hold, and only with the user's explicit go.
 
+## Recorded deviation: £15 live test account (approved by the user, 2026-11-11)
+
+The IG demo index account is broken, so the user approved testing on a **live** account holding about £15 of money they treat as play money. This deviates from criterion 1 (100 demo trades before any live money). Criteria 1 to 4 stay as written and still apply before any larger stake. Results on £15 are too few and too noisy to count as the demo evidence.
+
+- Live is off by default. It needs `IG_ENV=live`, the separate `IG_LIVE_*` credentials, and a client built with `allow_live=True`.
+- **Live order placement and closing stay disabled in code** (`live_orders_enabled=False`) until the read-only live smoke test has passed and the user says go.
+- Risk profile `live_test` applies only when `IG_ENV=live`: cap 5% per trade, daily loss limit 10%, weekly 20%, max 1 open position, max total open risk 5%. The agreed profile (0.5 to 1% per trade, 2% daily, 4% weekly, 3 open, 2% total) is unchanged and is the default on demo.
+- Unchanged on live: mandatory stop, `user_confirmed`, minimum stop and size checks, no widening a stop.
+
 ## Risk rules (enforced in code, not left to discipline)
 
 - Every order has a **stop**. The code refuses to place one without it.
