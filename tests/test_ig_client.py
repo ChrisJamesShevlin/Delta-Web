@@ -238,7 +238,7 @@ def prices_response(remaining=9000):
         200,
         {
             "prices": [price_row("2026-11-10T00:00:00", 100, 110, 90, 105), price_row("2026-11-09T00:00:00", 95, 101, 92, 100)],
-            "metadata": {"allowance": {"remainingAllowance": remaining}},
+            "allowance": {"remainingAllowance": remaining, "totalAllowance": 10000, "allowanceExpiry": 1000},
         },
     )
 
@@ -250,6 +250,13 @@ def test_prices_parse_sort_and_second_call_uses_cache(tmp_path):
     assert list(df["close"]) == [100.0, 105.0]  # sorted oldest first, mid of bid/ask
     c.get_prices(EPIC, "DAY", 2)
     assert s.paths().count(("GET", path)) == 1
+
+
+def test_pull_saves_the_remaining_allowance_from_the_real_response_shape(tmp_path):
+    path = f"/prices/{EPIC}/DAY/2"
+    c, _ = client({("GET", path): [prices_response(remaining=9936)]}, tmp_path)
+    c.get_prices(EPIC, "DAY", 2)
+    assert PriceCache(tmp_path).load_allowance() == 9936
 
 
 def test_allowance_guard_blocks_oversized_pull(tmp_path):

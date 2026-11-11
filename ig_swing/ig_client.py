@@ -397,8 +397,10 @@ class IGClient:
             )
             rows = self._parse_prices(data)
             self._cache.save(key, rows)
+            # Verified live: the allowance sits at the top level of the response.
+            allowance = data.get("allowance") or (data.get("metadata") or {}).get("allowance") or {}
             try:
-                self._cache.save_allowance(int(data["metadata"]["allowance"]["remainingAllowance"]))
+                self._cache.save_allowance(int(allowance["remainingAllowance"]))
             except (KeyError, TypeError, ValueError):
                 pass
         if not rows:
