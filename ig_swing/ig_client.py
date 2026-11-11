@@ -551,6 +551,37 @@ class IGClient:
             raise IGError(200, None, "close position (no dealReference returned)")
         return str(ref)
 
+    def amend_position(self, *, position: Position, new_stop: float | None = None, new_limit: float | None = None, user_confirmed: bool) -> str:
+        """Change a position's stop and/or take-profit level. A stop can stay or tighten, never widen, and can never be removed.
+
+        IG clears a level that is left out of the request, so both current levels are always sent.
+        """
+        if user_confirmed is not True:
+            raise PermissionError("Amend refused: not confirmed.")
+        self._require_orders_allowed("Amend")
+        stop = position.stop_level if new_stop is None else new_stop
+        if stop is None or not _is_positive(stop):
+            raise ValueError("Amend refused: a stop is mandatory.")
+        if new_stop is not None and position.stop_level is not None:
+            from .risk import validate_stop_move
+
+            validate_stop_move(position.direction, position.stop_level, new_stop)
+        if position.direction == "BUY" and position.bid is not None and stop >= position.bid:
+            raise ValueError("Amend refused: the stop on a long must be below the current price.")
+        if position.direction == "SELL" and position.offer is not None and stop <= position.offer:
+            raise ValueError("Amend refused: the stop on a short must be above the current price.")
+        limit = position.limit_level if new_limit is None else new_limit
+        if limit is not None and not _is_positive(limit):
+            raise ValueError("limit must be above zero when given")
+        body: dict[str, Any] = {"stopLevel": stop, "trailingStop": False}
+        if limit is not None:
+            body["limitLevel"] = limit
+        data = self._call("PUT", f"/positions/otc/{position.deal_id}", "2", body=body, context="amend position")
+        ref = data.get("dealReference")
+        if not ref:
+            raise IGError(200, None, "amend position (no dealReference returned)")
+        return str(ref)
+
     def confirm_deal(self, deal_reference: str) -> Confirmation:
         """Fetch the deal outcome. Raises OrderRejected unless it was ACCEPTED."""
         data = self._call("GET", f"/confirms/{deal_reference}", "1", context="confirm deal")

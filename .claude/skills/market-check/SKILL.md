@@ -1,11 +1,25 @@
 ---
 name: market-check
-description: Use when the user says "market check", "check the markets", "any trades?", or reports a sudden drop or spike in a market and asks whether there is a trade. Scans the whole default list (stock indices, US shares, metals, energy and currencies) with the read-only IG briefing, including IG client sentiment, the calendar, news by market and earnings; gives a closer read on anything the user names, and can trade ANY market IG offers, not just the list. Records shadow ideas with honest win probabilities and 1/8 Kelly sizing for the £45 play-money challenge, picks at most one live candidate, and places it itself under the user's standing authorisation when every guardrail passes; otherwise stops and asks.
+description: Use when the user says "market check", "check the markets", "any trades?", or reports a sudden drop or spike in a market and asks whether there is a trade. Scans the whole default list (stock indices, US shares, metals, energy and currencies) with the read-only IG briefing, including IG client sentiment, the calendar, news by market and earnings; gives a closer read on anything the user names, and can trade ANY market IG offers, not just the list. Records shadow ideas with honest win probabilities and 1/8 Kelly sizing for the £45 play-money challenge, picks at most one live candidate, manages every open position (cuts losers early, tightens stops, takes profit, reverses when the evidence flips) and places orders itself under the user's standing authorisation when every guardrail passes; otherwise stops and asks.
 ---
 
 # Market check (the £45 challenge)
 
 Read the section "The £45 play-money challenge" in CLAUDE.md first. Those rules decide everything below. Nothing here is a proven edge: say so, plainly, every time.
+
+## 0. Review open positions FIRST, before looking for anything new
+Run `python3 -m ig_swing.manage list` at the start of every check. Managing an open trade is risk management and comes before new ideas. For each position look at its P&L in R, its stop and take-profit, the thesis and invalidation recorded at entry, and what has changed since. Then act, unprompted, under the user's standing authorisation (2026-11-11). The user's point: you trade without emotion, so you are better placed to decide, and **cutting losers short is where most traders fail**.
+
+You may, without asking:
+- **Close a position in loss or in profit** with `python3 -m ig_swing.manage close --deal-id ... --reason-type <thesis_invalidated|new_information|risk_event|time|reversal|profit_taking|other> --reason "<why>" --execute` (with `IG_LIVE_ORDERS=yes`). **Cut a loser early, before its stop, when its thesis is broken**: the invalidation you recorded has happened (a level broken, the catalyst reversed, the data went the other way) or the facts have changed. Never hold a dead thesis because the stop is not hit yet, and never hope.
+- **Tighten a stop** (`manage stop ... --level|--breakeven|--distance`) or run the mechanical rule every check: `manage trail --execute` (stop to breakeven once up 1R, to +1R once up 2R). **Set or move the take-profit** (`manage limit`).
+- **Reverse**: close with `--reason-type reversal`, then record a NEW idea in the opposite direction with its own honest probability, stop and target, and place it with `ig_swing.place`. A reversal is a fresh assessment, never "to win it back". The daily limit of two new trades and the cooldown after two losing trades still apply, and a cut loser counts as a loss: if they block the new entry, say so and do not look for a way round.
+- Before a high-impact event (CPI, jobs, FOMC) in a market where you hold a position that is not an event trade, tighten to breakeven or close.
+- At the end of an idea's time horizon with neither stop nor target hit, reassess and close if the thesis is not working (`--reason-type time`).
+
+Rules for early exits: tie each one to a stated reason, not to discomfort or the clock. They are discretionary and can hurt (cutting a trade that would have worked), so run `python3 -m ig_swing.manage history` now and then: it compares early exits with stop and target hits, which is how we learn whether cutting early helps. Run each changing command first without `--execute` if you are unsure; the dry run shows exactly what would change.
+
+Never: widen a stop, remove a stop, add to a position, average down, or touch an account other than the challenge account. A stop can only tighten (the client refuses otherwise). Tell the user at once after any action, in plain words: what, why, the result. Between sessions only IG's server-side stop and take-profit protect a position, so be conservative about leaving a position unprotected from a risk event.
 
 ## 1. Get the data (read-only)
 The universe is NOT limited to a list. The user's instruction: we can trade anything, so do not narrow it. The briefing scans a default list so nothing obvious is missed, and anything else on IG can be looked at and traded.
@@ -52,7 +66,7 @@ How: run the dry run `python3 -m ig_swing.place --market ... --direction ... --s
 
 **Stop and ask the user instead of placing** if: any IG error or rate-limit message appears; the dry run is refused or the profile is not `challenge`; anything about the market or the order looks unusual or you are unsure of something material; the user's latest message told you to hold off. Show them the dry run and ask.
 
-Placing is the only trade action this authorisation covers. There is no command to close or change a position yet: if an open position needs attention, tell the user and do not improvise. IG holds each stop server-side.
+Opening is one half of this authorisation; managing open positions (step 0) is the other. IG holds each stop server-side.
 
 ## 5. Report
 Say what you saw, what you recorded, what (if anything) is proposed live, and what you do not know. Mention `python3 -m ig_swing.challenge report` for the scored shadow book and the probability check. Keep it short.

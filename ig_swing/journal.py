@@ -118,6 +118,18 @@ class Journal:
             row = c.execute("SELECT equity FROM equity_daily WHERE day<=? ORDER BY day DESC LIMIT 1", (day,)).fetchone()
             return None if row is None else float(row["equity"])
 
+    def update_levels(self, deal_id: str, stop: float | None = None, target: float | None = None) -> bool:
+        """Record a moved stop and/or take-profit on a still-open trade. Returns whether a trade was updated."""
+        with self._conn() as c:
+            row = c.execute("SELECT id FROM trades WHERE deal_id=? AND closed_at IS NULL", (deal_id,)).fetchone()
+            if row is None:
+                return False
+            if stop is not None:
+                c.execute("UPDATE trades SET stop=? WHERE id=?", (stop, row["id"]))
+            if target is not None:
+                c.execute("UPDATE trades SET target=? WHERE id=?", (target, row["id"]))
+            return True
+
     def trades_opened_on(self, day: str) -> int:
         """Trades opened on this UTC date (YYYY-MM-DD), open or closed."""
         with self._conn() as c:
