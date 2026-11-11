@@ -22,6 +22,7 @@ import argparse
 import json
 import math
 import re
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -130,7 +131,7 @@ class InvalidIdea(ValueError):
 
 def make_idea(idea_id: int, now: datetime, market: str, direction: str, entry: float, spread_pts: float, stop_pts: float, target_pts: float,
               p_win: float, playbook: str, confidence: str, thesis: str, horizon_days: int = 5, live: bool = False,
-              research: str = "headlines", sources: list[str] | None = None, epic: str | None = None) -> dict[str, Any]:
+              research: str = "headlines", sources: list[str] | None = None, epic: str | None = None, features: dict[str, Any] | None = None) -> dict[str, Any]:
     direction, confidence = direction.upper(), confidence.upper()
     if not market or not market.strip():
         raise InvalidIdea("a market name is required (any market on IG is allowed)")
@@ -153,7 +154,7 @@ def make_idea(idea_id: int, now: datetime, market: str, direction: str, entry: f
         raise InvalidIdea(f"at most {MAX_SOURCES} sources of up to 300 characters each")
     return {"id": idea_id, "ts": now.isoformat(), "market": market, "direction": direction, "entry": float(entry), "spread_pts": float(spread_pts),
             "stop_pts": float(stop_pts), "target_pts": float(target_pts), "p_win": float(p_win), "playbook": playbook, "confidence": confidence,
-            "thesis": thesis.strip(), "horizon_days": int(horizon_days), "live": bool(live), "research": research, "sources": sources, "epic": epic}
+            "thesis": thesis.strip(), "horizon_days": int(horizon_days), "live": bool(live), "research": research, "sources": sources, "epic": epic, "features": features or {}}
 
 
 def load_ideas(events: list[dict]) -> list[dict]:
@@ -273,6 +274,94 @@ def calibration(finished: list[tuple[dict, dict]]) -> dict[str, Any]:
             buckets.append((lo, min(hi, 1.0), len(sel), sum(p for p, _ in sel) / len(sel), sum(w for _, w in sel) / len(sel)))
     return {"n": n, "predicted": pred, "actual": act, "brier": brier, "buckets": buckets,
             "calibrated": n >= CALIBRATION_MIN and abs(pred - act) <= CALIBRATION_TOLERANCE}
+
+
+def idea_features(info: dict[str, Any], atr_pts: float | None, range_pos: float | None, long_pct: float | None, events: list, now: datetime) -> dict[str, Any]:
+    """The conditions at the moment an idea is written, saved with it so any hypothesis can be tested later. Mechanical, no judgement."""
+    from .events import HIGH, MEDIUM
+
+    price = (info["bid"] + info["offer"]) / 2
+    net = info.get("net_change") or 0.0
+    return {"price": price, "day_pct": info.get("pct_change") or 0.0, "move_atr": (net / atr_pts) if atr_pts else None, "atr_pct": (atr_pts / price * 100) if atr_pts else None,
+            "range_pos": range_pos, "long_pct": long_pct, "spread_pct": info.get("spread_pct"),
+            "events_high_48h": sum(1 for e in events if e.tier == HIGH), "events_med_48h": sum(1 for e in events if e.tier == MEDIUM),
+            "hour_utc": now.hour, "weekday": now.weekday()}
+
+
+BASELINE_STOP_ATR, BASELINE_TARGET_ATR, BASELINE_HORIZON = 1.5, 3.0, 5
+
+
+def baseline_ideas_from_rows(rows: list[dict], now: datetime) -> list[dict[str, Any]]:
+    """The dumb mechanical benchmark, one per market per day: long if the price is above its 20-day average, else short; a stop of 1.5 ATR,
+    a target of 3 ATR (2 to 1), 5 days. Markets without daily bars (the shares) are left out. Scored with the same machinery as my ideas."""
+    out = []
+    for r in rows:
+        if not (r.get("atr") and r.get("sma20") and r.get("bid") and r.get("offer")):
+            continue
+        direction = "BUY" if r["price"] > r["sma20"] else "SELL"
+        out.append({"ts": now.isoformat(), "market": r["market"], "epic": r["epic"], "direction": direction,
+                    "entry": r["offer"] if direction == "BUY" else r["bid"], "spread_pts": r["offer"] - r["bid"],
+                    "stop_pts": BASELINE_STOP_ATR * r["atr"], "target_pts": BASELINE_TARGET_ATR * r["atr"], "horizon_days": BASELINE_HORIZON,
+                    "playbook": "baseline_trend"})
+    return out
+
+
+def measure_baseline(baselines: list[dict], get_bars: Callable[[str], pd.DataFrame]) -> list[tuple[dict, dict]]:
+    out = []
+    for b in baselines:
+        try:
+            res = score_idea(b, get_bars(b["epic"]))
+        except Exception:
+            continue
+        if res is not None:
+            out.append((b, res))
+    return out
+
+
+def matched_pairs(finished: list[tuple[dict, dict]], base_finished: list[tuple[dict, dict]]) -> list[tuple[dict, dict, dict]]:
+    """My finished ideas matched to the baseline for the same market on the same UTC day: (my idea, my result, the baseline result)."""
+    index = {(b["epic"], b["ts"][:10]): r for b, r in base_finished}
+    out = []
+    for idea, res in finished:
+        epic = idea.get("epic") or (ALL_MARKETS[idea["market"]][0] if idea["market"] in ALL_MARKETS else None)
+        base = index.get((epic, idea["ts"][:10]))
+        if base is not None:
+            out.append((idea, res, base))
+    return out
+
+
+def last_rule_change(changelog: str) -> str | None:
+    """The date of the newest entry in RULE_CHANGELOG.md (lines that start with '- YYYY-MM-DD')."""
+    dates = re.findall(r"^- (\d{4}-\d{2}-\d{2})", changelog, flags=re.M)
+    return max(dates) if dates else None
+
+
+def format_review(m: dict[str, Any], base_finished: list[tuple[dict, dict]], base_total: int, matched: list[tuple[dict, dict, dict]],
+                  snapshot_rows: int, snapshot_days: int, live_text: str, rule_date: str | None) -> str:
+    fin = m["finished"]
+    lines = ["REVIEW: what the data says, and how much it can be trusted", "",
+             f"Data: {snapshot_rows} market snapshots over {snapshot_days} day(s) archived; {m['total']} ideas recorded ({len(fin)} finished); "
+             f"{base_total} baseline ideas recorded ({len(base_finished)} finished)."]
+    if base_finished:
+        br = [r["r"] for _, r in base_finished]
+        lines.append(f"Dumb baseline (long above the 20-day average, else short; 1.5 ATR stop, 3 ATR target, 5 days): n={len(br)}, mean {mean_se(br)[0]:+.2f}R"
+                     + ("  (under 30: noise)" if len(br) < 30 else ""))
+    if matched:
+        mine, base = [r["r"] for _, r, _ in matched], [b["r"] for _, _, b in matched]
+        lines.append(f"My ideas against the baseline on the SAME market and day (n={len(matched)}): mine {mean_se(mine)[0]:+.2f}R, baseline {mean_se(base)[0]:+.2f}R, "
+                     f"difference {mean_se(mine)[0] - mean_se(base)[0]:+.2f}R" + ("  (under 30: noise)" if len(matched) < 30 else ""))
+    else:
+        lines.append("My ideas against the baseline on the same market and day: no matched finished pairs yet.")
+    lines += ["", format_report(m), ""]
+    lines.append("Live trades (closed): " + live_text.replace("\n", "\n  "))
+    if rule_date:
+        before = sum(1 for i, _ in fin if i["ts"][:10] <= rule_date)
+        lines.append(f"Rules last changed on {rule_date} (RULE_CHANGELOG.md): {before} finished idea(s) from before then, {len(fin) - before} since. Judge any change on the 'since' ideas only.")
+    n = len(fin)
+    lines += ["", ("Verdict: " + ("too few finished ideas to change anything. Keep collecting." if n < 30 else
+                                  "enough for a first descriptive look at each playbook, not enough to tune. Change one thing at a time and log it." if n < 100 else
+                                  "enough for a first real evaluation. Pre-state what would count as a change before looking."))]
+    return "\n".join(lines)
 
 
 TRAIL_WIDTHS = (1.0, 1.5, 2.0)
@@ -597,6 +686,7 @@ def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.Da
                 continue
             price = (snap.bid + snap.offer) / 2
             margin = snap.margin or margin
+            sma20 = None
             if name in SHARES:
                 a, atr_pct, range_pos = None, None, None
                 stake, note = stake_hint(equity, 10.0, 0.03 * price, price, margin, snap.min_stake)
@@ -607,7 +697,8 @@ def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.Da
                 hi, lo = float(bars["high"].tail(20).max()), float(bars["low"].tail(20).min())
                 stake, note = stake_hint(equity, 10.0, 1.5 * a, price, margin, snap.min_stake)
                 atr_pct, range_pos = a / price * 100, ((price - lo) / (hi - lo) if hi > lo else None)
-            rows.append({"market": name, "price": price, "day_pct": snap.pct_change or 0.0, "atr": a, "atr_pct": atr_pct,
+                sma20 = float(bars["close"].tail(20).mean())
+            rows.append({"market": name, "epic": epic, "bid": snap.bid, "offer": snap.offer, "sma20": sma20, "price": price, "day_pct": snap.pct_change or 0.0, "atr": a, "atr_pct": atr_pct,
                          "range_pos": range_pos, "long_pct": None, "stake": stake, "note": note,
                          "spread_pct": (snap.offer - snap.bid) / price * 100, "sent_id": sent_id or snap.sent_id or ""})
         except Exception as exc:  # type name only
@@ -622,6 +713,7 @@ def main(argv: list[str] | None = None) -> int:
     q = sub.add_parser("quick", help="a fast read on one market, for a sudden move")
     q.add_argument("--market", required=True, help="any IG market: a name from the briefing, an epic, or search words")
     sub.add_parser("report")
+    sub.add_parser("review", help="everything the data says so far, with the baseline, calibration and how much to trust it")
     f = sub.add_parser("find", help="look up any market on IG and see whether it fits the account")
     f.add_argument("--term", required=True)
     i = sub.add_parser("idea")
@@ -672,8 +764,27 @@ def main(argv: list[str] | None = None) -> int:
             direction = args.direction.upper()
             entry = info["offer"] if direction == "BUY" else info["bid"]
             n = len(load_ideas(journal.events())) + 1
+            atr_pts, range_pos = None, None
+            try:
+                from .indicators import atr as atr_fn
+                bars_ = clean_daily(client.get_prices(info["epic"], "DAY", 30), now)
+                atr_pts = float(atr_fn(bars_, 14).iloc[-1])
+                lo_, hi_ = float(bars_["low"].tail(20).min()), float(bars_["high"].tail(20).max())
+                range_pos = ((info["bid"] + info["offer"]) / 2 - lo_) / (hi_ - lo_) if hi_ > lo_ else None
+            except Exception:
+                pass
+            long_pct = batch_sentiment(client, [info["sent_id"]]).get(info["sent_id"]) if info["sent_id"] else None
+            try:
+                import requests
+
+                from .config import optional_key
+                from .events import load_events
+                evs_, _ = load_events(requests.Session(), now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
+            except Exception:
+                evs_ = []
+            features = idea_features(info, atr_pts, range_pos, long_pct, evs_, now)
             idea = make_idea(n, now, info["name"], direction, entry, info["offer"] - info["bid"], args.stop, args.target, args.p_win, args.playbook,
-                             args.confidence, args.thesis, args.horizon, args.live, args.research, args.source, info["epic"])
+                             args.confidence, args.thesis, args.horizon, args.live, args.research, args.source, info["epic"], features)
             journal.record_event(now.isoformat(), KIND, json.dumps(idea))
             rr = args.target / args.stop
             ks = kelly_fraction(args.p_win, rr)
@@ -723,6 +834,25 @@ def main(argv: list[str] | None = None) -> int:
             for n in ev_notes + hd_notes:
                 print(f"  note: {n}")
             return 0
+        if args.cmd == "review":
+            from .manage import format_history
+
+            memo: dict[str, pd.DataFrame] = {}
+
+            def get_bars(key: str) -> pd.DataFrame:
+                epic_ = key if looks_like_epic(key) else ALL_MARKETS[key][0]
+                if epic_ not in memo:
+                    memo[epic_] = clean_daily(client.get_prices(epic_, "DAY", 40), now)
+                return memo[epic_]
+
+            m = measure(load_ideas(journal.events()), get_bars)
+            bl = journal.baselines()
+            bf = measure_baseline(bl, get_bars)
+            rows_, days_ = journal.snapshot_counts()
+            cl = Path("RULE_CHANGELOG.md")
+            print(format_review(m, bf, len(bl), matched_pairs(m["finished"], bf), rows_, days_, format_history(journal.closed_trades()),
+                                last_rule_change(cl.read_text()) if cl.exists() else None))
+            return 0
         if args.cmd == "report":
             get_bars = lambda key: clean_daily(client.get_prices(key if looks_like_epic(key) else ALL_MARKETS[key][0], "DAY", 60), now)
             print(format_report(measure(load_ideas(journal.events()), get_bars)))
@@ -739,6 +869,12 @@ def main(argv: list[str] | None = None) -> int:
         sentiment = batch_sentiment(client, [r["sent_id"] for r in rows if r["sent_id"]])
         for r in rows:
             r["long_pct"] = sentiment.get(r["sent_id"]) if r["sent_id"] else None
+        try:
+            journal.record_snapshots(now.isoformat(), rows)
+            if not journal.baseline_day_recorded(now.date().isoformat()):
+                journal.record_baselines(now.date().isoformat(), baseline_ideas_from_rows(rows, now))
+        except Exception:
+            notes.append("archive: could not be written")
         events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
         heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 40)
         ev_text = format_events(events)

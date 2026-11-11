@@ -598,6 +598,17 @@ class IGClient:
             raise IGError(200, None, "amend position (no dealReference returned)")
         return str(ref)
 
+    def get_transactions(self, since: Any) -> list[dict[str, Any]]:
+        """Closed deals since a date (read-only). Values are normalised: levels and size as numbers, times as given by IG (UTC)."""
+        data = self._call("GET", "/history/transactions", "2", params={"type": "ALL_DEAL", "from": since.isoformat(), "pageSize": 100}, context="transactions")
+        out = []
+        for t in data.get("transactions", []):
+            size = _num(str(t.get("size", "")).replace("+", "").replace("-", "")) if t.get("size") is not None else None
+            out.append({"instrument": t.get("instrumentName"), "open_level": _num(t.get("openLevel")), "close_level": _num(t.get("closeLevel")), "size": size,
+                        "pnl_text": t.get("profitAndLoss"), "closed_utc": t.get("dateUtc") or t.get("date"), "opened_utc": t.get("openDateUtc"),
+                        "reference": t.get("reference"), "type": t.get("transactionType")})
+        return out
+
     def confirm_deal(self, deal_reference: str) -> Confirmation:
         """Fetch the deal outcome. Raises OrderRejected unless it was ACCEPTED."""
         data = self._call("GET", f"/confirms/{deal_reference}", "1", context="confirm deal")

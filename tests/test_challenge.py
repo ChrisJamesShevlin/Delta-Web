@@ -370,3 +370,82 @@ def test_wider_trails_hold_on_longer_and_give_back_more_or_less_by_hand():
     assert one_half["exit"] == pytest.approx(11149.0) and one_half["r"] == pytest.approx(1.49)       # best 11299, stop 1.5R behind: hit a bar later
     assert two["reason"] == "trail_stop_gap" and two["exit"] == pytest.approx(10999.0)               # 2R behind stays out of the dip, then the flat open gaps through it
     assert ch.TRAIL_WIDTHS == (1.0, 1.5, 2.0)
+
+
+# ---- the learning loop: archive, baseline, conditions, review --------------
+
+
+def row(market="EUR/USD", price=11100.0, sma20=11000.0, atr=60.0, bid=11099.0, offer=11101.0, **kw):
+    base = {"market": market, "epic": "CS.D.EURUSD.TODAY.IP", "bid": bid, "offer": offer, "sma20": sma20, "price": price, "day_pct": 0.5, "atr": atr, "atr_pct": 0.54,
+            "range_pos": 0.6, "long_pct": 62.0, "spread_pct": 0.018}
+    base.update(kw)
+    return base
+
+
+def test_baseline_is_long_above_the_20_day_average_short_below_and_skips_shares():
+    ideas = ch.baseline_ideas_from_rows([row(), row("Gold", price=3900.0, sma20=4000.0, atr=80.0, bid=3899.0, offer=3901.0), row("Apple", atr=None, sma20=None)], NOW)
+    assert [i["market"] for i in ideas] == ["EUR/USD", "Gold"]
+    up, down = ideas
+    assert up["direction"] == "BUY" and up["entry"] == 11101.0 and up["stop_pts"] == pytest.approx(90.0) and up["target_pts"] == pytest.approx(180.0)
+    assert down["direction"] == "SELL" and down["entry"] == 3899.0 and down["spread_pts"] == pytest.approx(2.0) and up["horizon_days"] == 5 and up["playbook"] == "baseline_trend"
+
+
+def test_conditions_are_saved_with_the_idea():
+    info = {"bid": 11099.0, "offer": 11101.0, "pct_change": -0.8, "net_change": -90.0, "spread_pct": 0.018}
+    from datetime import date
+    from ig_swing.events import Event
+    from ig_swing.events import HIGH, MEDIUM
+    evs = [Event(date(2026, 11, 13), "PPI", HIGH, "BLS", None), Event(date(2026, 11, 12), "Claims", MEDIUM, "FRED", None), Event(date(2026, 11, 12), "Minor", "low", "FRED", None)]
+    f = ch.idea_features(info, 60.0, 0.1, 80.0, evs, NOW)
+    assert f["move_atr"] == pytest.approx(-1.5) and f["atr_pct"] == pytest.approx(60 / 11100 * 100) and f["long_pct"] == 80.0 and f["range_pos"] == 0.1
+    assert f["events_high_48h"] == 1 and f["events_med_48h"] == 1 and f["hour_utc"] == 10 and f["weekday"] == NOW.weekday() and f["day_pct"] == -0.8
+    assert ch.idea_features(info, None, None, None, [], NOW)["move_atr"] is None                     # shares and failures leave gaps, not guesses
+    assert idea()["features"] == {} and idea(features={"x": 1})["features"] == {"x": 1}
+
+
+def test_the_archive_and_baseline_are_stored_once_and_read_back(tmp_path):
+    from ig_swing.journal import Journal
+    j = Journal(tmp_path / "j.db")
+    assert j.snapshot_counts() == (0, 0)
+    assert j.record_snapshots("2026-11-11T20:00:00+00:00", [row(), row("Gold", price=3900.0)]) == 2
+    j.record_snapshots("2026-11-12T08:00:00+00:00", [row()])
+    assert j.snapshot_counts() == (3, 2)
+    assert not j.baseline_day_recorded("2026-11-11")
+    ideas = ch.baseline_ideas_from_rows([row()], NOW)
+    assert j.record_baselines("2026-11-11", ideas) == 1 and j.baseline_day_recorded("2026-11-11")
+    assert j.record_baselines("2026-11-11", ideas) == 0                                              # the same market and day is never recorded twice
+    got = j.baselines()
+    assert len(got) == 1 and got[0]["id"] == 1 and got[0]["market"] == "EUR/USD"
+
+
+def test_baseline_scoring_and_the_matched_comparison_by_hand():
+    base = ch.baseline_ideas_from_rows([row()], NOW)                                                  # BUY at 11101, stop 90, target 180
+    base[0]["id"] = 1
+    b = bars([(11100.0, 11110.0, 11095.0, 11105.0), (11105.0, 11300.0, 11100.0, 11250.0)], start="2026-11-03")   # the target (11281) is reached on day 2
+    got = ch.measure_baseline(base, lambda epic: b)
+    assert len(got) == 1 and got[0][1]["reason"] == "target" and got[0][1]["r"] == pytest.approx(2.0)
+    mine = idea(epic="CS.D.EURUSD.TODAY.IP", direction="BUY", entry=11101.0, stop_pts=90.0, target_pts=180.0)
+    mine_fin = [(mine, ch.score_idea(mine, b))]
+    pairs = ch.matched_pairs(mine_fin, got)
+    assert len(pairs) == 1 and pairs[0][2]["r"] == pytest.approx(2.0)
+    other_day = dict(mine, ts="2026-11-05T10:00:00+00:00")
+    assert ch.matched_pairs([(other_day, mine_fin[0][1])], got) == []                                  # a different day does not match
+
+
+def test_rule_changelog_date_and_the_review_text():
+    assert ch.last_rule_change("# x\n- 2026-11-11 a\n- 2026-12-02 b\ntext 2027-01-01") == "2026-12-02" and ch.last_rule_change("nothing") is None
+    i = idea(epic="CS.D.EURUSD.TODAY.IP", horizon_days=2)
+    b = bars([FLAT, (11000.0, 11250.0, 10995.0, 11200.0)])
+    m = ch.measure([i], lambda k: b)
+    base = ch.baseline_ideas_from_rows([row()], NOW)
+    base[0]["id"] = 1
+    bf = ch.measure_baseline(base, lambda e: b)
+    text = ch.format_review(m, bf, 1, ch.matched_pairs(m["finished"], bf), 40, 2, "No closed trades yet.", "2026-11-11")
+    for needle in ("REVIEW", "40 market snapshots over 2 day(s)", "1 ideas recorded (1 finished)", "Dumb baseline", "Exit style comparison", "Probability check",
+                   "Live trades (closed): No closed trades yet.", "Rules last changed on 2026-11-11", "too few finished ideas to change anything"):
+        assert needle in text
+
+
+def test_the_changelog_file_exists_and_is_parseable():
+    text = open("RULE_CHANGELOG.md").read()
+    assert ch.last_rule_change(text) == "2026-11-11" and text.count("\n- 20") >= 4

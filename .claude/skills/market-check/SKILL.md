@@ -8,7 +8,7 @@ description: Use when the user says "market check", "check the markets", "any tr
 Read the section "The £45 play-money challenge" in CLAUDE.md first. Those rules decide everything below. Nothing here is a proven edge: say so, plainly, every time.
 
 ## 0. Review open positions FIRST, before looking for anything new
-Run `python3 -m ig_swing.manage list` at the start of every check. Managing an open trade is risk management and comes before new ideas. For each position look at its P&L in R, its stop and take-profit, the thesis and invalidation recorded at entry, and what has changed since. Then act, unprompted, under the user's standing authorisation (2026-11-11). The user's point: you trade without emotion, so you are better placed to decide, and **cutting losers short is where most traders fail**.
+First run `python3 -m ig_swing.manage reconcile --execute` (it records in the journal any trade IG closed on its own, by stop or take-profit, since the last session; it changes the journal only and places nothing; if it reports a close it could not match, tell the user). Then run `python3 -m ig_swing.manage list` at the start of every check (it also logs a position check, so the best and worst excursion can be estimated later). Managing an open trade is risk management and comes before new ideas. For each position look at its P&L in R, its stop and take-profit, the thesis and invalidation recorded at entry, and what has changed since. Then act, unprompted, under the user's standing authorisation (2026-11-11). The user's point: you trade without emotion, so you are better placed to decide, and **cutting losers short is where most traders fail**.
 
 You may, without asking:
 - **Close a position in loss or in profit** with `python3 -m ig_swing.manage close --deal-id ... --reason-type <thesis_invalidated|new_information|risk_event|time|reversal|profit_taking|other> --reason "<why>" --execute` (with `IG_LIVE_ORDERS=yes`). **Cut a loser early, before its stop, when its thesis is broken**: the invalidation you recorded has happened (a level broken, the catalyst reversed, the data went the other way) or the facts have changed. Never hold a dead thesis because the stop is not hit yet, and never hope.
@@ -72,6 +72,13 @@ Opening is one half of this authorisation; managing open positions (step 0) is t
 
 ## 5. Report
 Say what you saw, what you recorded, what (if anything) is proposed live, and what you do not know. Mention `python3 -m ig_swing.challenge report` for the scored shadow book and the probability check. Keep it short.
+
+## 6. The learning loop (keep the data clean, do not tune on noise)
+- **Run the full briefing at least once on every day we work.** Each run archives every market's conditions (price, move, volatility, range position, IG client sentiment) in the journal and records that day's mechanical baseline idea per market (long above the 20-day average, else short; 1.5 ATR stop, 3 ATR target, 5 days). Every idea you record automatically saves the conditions at that moment (move in ATRs, range position, IG sentiment, events due, hour, weekday). This is the dataset any later analysis depends on.
+- **Record every idea you seriously consider**, including ones you do not take live, and never edit one afterwards.
+- **Run `python3 -m ig_swing.challenge review` about weekly, or when the user asks.** It compares my ideas with the dumb baseline on the same market and day, splits results by playbook, confidence, research depth and exit style, checks my stated probabilities against what happened, and shows closed live trades by exit reason. It says plainly when there are too few results.
+- **Never change a rule on fewer than about 30 results per playbook, and change one thing at a time.** Substantive changes to staking, limits or the guardrails need the user's explicit go. Every rule change gets a dated line in `RULE_CHANGELOG.md` before it takes effect, so results can be split into before and after, and a change is judged only on ideas written after it. Do not re-score old ideas to fit a tweak, do not slice results by many features on small numbers, and say how many variants have been tried.
+- Machine learning is a later question (about a year of data): any model must beat the baseline and my own judgement on data it has not seen, by a margin set in advance, and would only ever be a second vote.
 
 ## Never
 - Place an order outside the conditions in step 4, with `--ignore-kelly`, when the profile is not `challenge`, or on any account other than the challenge account.

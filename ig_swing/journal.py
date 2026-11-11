@@ -37,6 +37,18 @@ CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT
 );
+CREATE TABLE IF NOT EXISTS snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL, day TEXT NOT NULL, market TEXT NOT NULL, epic TEXT NOT NULL,
+    price REAL, bid REAL, offer REAL, spread_pct REAL, day_pct REAL, atr REAL, atr_pct REAL,
+    range_pos REAL, long_pct REAL, sma20 REAL
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_day ON snapshots(day, epic);
+CREATE TABLE IF NOT EXISTS baseline_ideas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    day TEXT NOT NULL, epic TEXT NOT NULL, detail TEXT NOT NULL,
+    UNIQUE(day, epic)
+);
 CREATE TABLE IF NOT EXISTS equity_daily (
     day TEXT PRIMARY KEY, equity REAL NOT NULL, env TEXT
 );
@@ -117,6 +129,42 @@ class Journal:
         with self._conn() as c:
             row = c.execute("SELECT equity FROM equity_daily WHERE day<=? ORDER BY day DESC LIMIT 1", (day,)).fetchone()
             return None if row is None else float(row["equity"])
+
+    def record_snapshots(self, ts: str, rows: list[dict[str, Any]]) -> int:
+        """Archive one briefing: every market's conditions at that moment. Mechanical data, written before any outcome is known."""
+        day = ts[:10]
+        with self._conn() as c:
+            for r in rows:
+                c.execute("INSERT INTO snapshots (ts, day, market, epic, price, bid, offer, spread_pct, day_pct, atr, atr_pct, range_pos, long_pct, sma20) "
+                          "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (ts, day, r["market"], r["epic"], r.get("price"), r.get("bid"), r.get("offer"), r.get("spread_pct"), r.get("day_pct"), r.get("atr"),
+                           r.get("atr_pct"), r.get("range_pos"), r.get("long_pct"), r.get("sma20")))
+        return len(rows)
+
+    def snapshot_counts(self) -> tuple[int, int]:
+        """(rows, distinct days) in the archive."""
+        with self._conn() as c:
+            row = c.execute("SELECT COUNT(*) AS n, COUNT(DISTINCT day) AS d FROM snapshots").fetchone()
+            return int(row["n"]), int(row["d"])
+
+    def record_baselines(self, day: str, ideas: list[dict[str, Any]]) -> int:
+        """Store the day's mechanical baseline ideas once (the first briefing of a UTC day). Returns how many were new."""
+        new = 0
+        with self._conn() as c:
+            for idea in ideas:
+                cur = c.execute("INSERT OR IGNORE INTO baseline_ideas (day, epic, detail) VALUES (?,?,?)", (day, idea["epic"], json.dumps(idea)))
+                if cur.rowcount:
+                    new += 1
+                    c.execute("UPDATE baseline_ideas SET detail=? WHERE id=?", (json.dumps({**idea, "id": cur.lastrowid}), cur.lastrowid))
+        return new
+
+    def baselines(self) -> list[dict[str, Any]]:
+        with self._conn() as c:
+            return [json.loads(r["detail"]) for r in c.execute("SELECT detail FROM baseline_ideas ORDER BY id")]
+
+    def baseline_day_recorded(self, day: str) -> bool:
+        with self._conn() as c:
+            return c.execute("SELECT 1 FROM baseline_ideas WHERE day=? LIMIT 1", (day,)).fetchone() is not None
 
     def update_levels(self, deal_id: str, stop: float | None = None, target: float | None = None) -> bool:
         """Record a moved stop and/or take-profit on a still-open trade. Returns whether a trade was updated."""

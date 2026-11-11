@@ -7,6 +7,7 @@
   python3 -m ig_swing.manage trailing --deal-id D1 [--execute]   up 1R or more: stop to breakeven and an IG trailing stop (manual steps are printed if IG refuses)
   python3 -m ig_swing.manage trail [--execute]          the mechanical rule: stop to breakeven at +1R, to +1R at +2R (skips positions IG is trailing)
   python3 -m ig_swing.manage history                    closed trades by exit reason: does cutting early help?
+  python3 -m ig_swing.manage reconcile [--execute]      record trades IG closed on its own in the journal (journal only, no order)
 
 Every changing command is a DRY RUN unless --execute is given AND IG_LIVE_ORDERS=yes is set AND the challenge risk profile is active.
 The assistant runs these unprompted under the user's standing authorisation (2026-11-11): closing a position in profit or in loss,
@@ -138,6 +139,82 @@ def format_history(closed: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _utc(value: Any) -> Any:
+    import pandas as pd
+
+    try:
+        ts = pd.Timestamp(value)
+    except Exception:
+        return None
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
+def match_transaction(trade: dict, txs: list[dict]) -> dict | None:
+    """The closed deal that matches a journalled trade: same market and size, the open level within a small tolerance, nearest in time."""
+    opened = _utc(trade.get("opened_at"))
+    entry, size = trade["entry"], trade["size"]
+    tol = max(abs(entry) * 0.0005, 1.0)
+    best, best_gap = None, None
+    for t in txs:
+        if not t.get("instrument") or not (str(trade.get("market") or "").lower() in str(t["instrument"]).lower() or str(t["instrument"]).lower() in str(trade.get("market") or "").lower()):
+            continue
+        if t.get("size") is not None and abs(t["size"] - size) > 1e-9:
+            continue
+        if t.get("open_level") is None or abs(t["open_level"] - entry) > tol or t.get("close_level") is None:
+            continue
+        t_open = _utc(t.get("opened_utc"))
+        gap = abs((t_open - opened).total_seconds()) if (t_open is not None and opened is not None) else 0.0
+        if gap > 3600:
+            continue
+        if best is None or gap < best_gap:
+            best, best_gap = t, gap
+    return best
+
+
+def infer_exit_reason(trade: dict, close_level: float) -> str:
+    """Server-side closes: near the stop or the take-profit, else closed outside a session (by the user in the platform, say)."""
+    r = abs(trade["entry"] - trade["stop"]) or 1.0
+    tol = max(0.1 * r, 1.0)
+    if abs(close_level - trade["stop"]) <= tol:
+        return "stop (closed by IG)"
+    if trade.get("target") is not None and abs(close_level - trade["target"]) <= tol:
+        return "target (closed by IG)"
+    return "closed outside a session"
+
+
+def reconcile_plan(open_trades: list[dict], positions: list[Position], txs: list[dict]) -> dict[str, Any]:
+    """Journal trades that IG no longer holds, matched to their closing deal where one can be found, and positions IG holds that the journal does not know."""
+    held = {p.deal_id for p in positions}
+    known = {t["deal_id"] for t in open_trades}
+    gone = []
+    for t in open_trades:
+        if t["deal_id"] in held:
+            continue
+        tx = match_transaction(t, txs)
+        gone.append({"trade": t, "tx": tx, "reason": infer_exit_reason(t, tx["close_level"]) if tx else None})
+    return {"closed": gone, "unknown_positions": [p for p in positions if p.deal_id not in known]}
+
+
+def excursion_note(checks: list[float]) -> str:
+    if not checks:
+        return "no position checks were recorded while it was open"
+    return f"best {max(checks):+.2f}R and worst {min(checks):+.2f}R seen at {len(checks)} check(s) (coarse: only moments when a session looked)"
+
+
+def apply_reconcile(journal: Any, plan: dict[str, Any], checks_by_deal: dict[str, list[float]], now: datetime) -> list[str]:
+    done = []
+    for item in plan["closed"]:
+        t, tx = item["trade"], item["tx"]
+        if tx is None:
+            done.append(f"{t['market']} [{t['deal_id']}]: IG no longer holds it but no matching closed deal was found, check the IG platform")
+            continue
+        closed_at = _utc(tx.get("closed_utc"))
+        when = (closed_at or _utc(now.isoformat())).isoformat()
+        journal.close_trade(t["id"], when, tx["close_level"], item["reason"], notes=f"IG P&L {tx.get('pnl_text')}; " + excursion_note(checks_by_deal.get(t["deal_id"], [])))
+        done.append(f"{t['market']} [{t['deal_id']}]: recorded as closed at {tx['close_level']:g}, {item['reason']}")
+    return done
+
+
 def _find(positions: list[Position], deal_id: str) -> Position:
     for p in positions:
         if p.deal_id == deal_id:
@@ -191,6 +268,8 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--breakeven", action="store_true")
     g.add_argument("--distance", type=float, help="points from the current price")
     s.add_argument("--execute", action="store_true")
+    rc = sub.add_parser("reconcile", help="record trades IG closed on its own (stop or take-profit) in the journal; changes the journal only, places nothing")
+    rc.add_argument("--execute", action="store_true")
     tr = sub.add_parser("trailing", help="switch a winning position (up 1R or more) to an IG trailing stop")
     tr.add_argument("--deal-id", required=True)
     tr.add_argument("--execute", action="store_true")
@@ -223,7 +302,37 @@ def main(argv: list[str] | None = None) -> int:
             if not positions:
                 print("No open positions.")
             for p in positions:
-                print(describe(p, open_trades.get(p.deal_id)))
+                tr_ = open_trades.get(p.deal_id)
+                print(describe(p, tr_))
+                m_ = move_in_r(p, initial_risk_points(p, tr_))
+                if m_ is not None:                                                  # a coarse record of how far each trade has run, for later review
+                    journal.record_event(now.isoformat(), "position_check", json.dumps({"deal_id": p.deal_id, "r": round(m_, 3)}))
+            return 0
+        if args.cmd == "reconcile":
+            since = min((_utc(t["opened_at"]) for t in open_trades.values()), default=None)
+            txs = client.get_transactions(since.date()) if (since is not None and any(t["deal_id"] not in {p.deal_id for p in positions} for t in open_trades.values())) else []
+            plan = reconcile_plan(list(open_trades.values()), positions, txs)
+            checks: dict[str, list[float]] = {}
+            for e in journal.events():
+                if e["kind"] == "position_check":
+                    try:
+                        d = json.loads(e["detail"])
+                        checks.setdefault(d["deal_id"], []).append(float(d["r"]))
+                    except (ValueError, KeyError, TypeError):
+                        continue
+            if not plan["closed"] and not plan["unknown_positions"]:
+                print("The journal and IG agree: nothing to reconcile.")
+                return 0
+            for item in plan["closed"]:
+                t, tx = item["trade"], item["tx"]
+                print(f"{'would record' if not args.execute else 'recording'}: {t['market']} [{t['deal_id']}] closed by IG" + (f" at {tx['close_level']:g}, {item['reason']}" if tx else ", but no matching closed deal found"))
+            for p in plan["unknown_positions"]:
+                print(f"WARNING: IG holds {p.instrument_name} [{p.deal_id}] that the journal does not know about (opened outside this tool?)")
+            if args.execute:
+                for line in apply_reconcile(journal, plan, checks, now):
+                    print(" ", line)
+            else:
+                print("Dry run: add --execute to write the closes to the journal (no order is placed either way).")
             return 0
         execute = getattr(args, "execute", False)
         if execute and not live_ok:

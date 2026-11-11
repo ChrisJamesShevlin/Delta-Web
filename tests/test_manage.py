@@ -237,3 +237,94 @@ def test_client_sends_the_trailing_fields_and_refuses_a_widening_distance(tmp_pa
         c.amend_position(position=p, trailing=(2.0, 1.0), user_confirmed=True)                       # under the market minimum
     with pytest.raises(ValueError):
         c.amend_position(position=p, trailing=(0.0, 1.0), user_confirmed=True)
+
+
+# ---- reconciling trades that IG closed on its own -------------------------
+
+
+def trade_row(**kw):
+    base = {"id": 1, "deal_id": "D1", "market": "EUR/USD", "entry": 11000.0, "stop": 10900.0, "target": 11200.0, "size": 0.01,
+            "opened_at": "2026-11-12T09:00:00+00:00"}
+    base.update(kw)
+    return base
+
+
+def tx(**kw):
+    base = {"instrument": "EUR/USD", "open_level": 11000.5, "close_level": 10900.0, "size": 0.01, "pnl_text": "£-1.00", "closed_utc": "2026-11-12T14:00:00",
+            "opened_utc": "2026-11-12T09:00:20", "reference": "X"}
+    base.update(kw)
+    return base
+
+
+def test_a_closed_deal_is_matched_on_market_size_level_and_time():
+    t = trade_row()
+    assert mg.match_transaction(t, [tx()]) is not None
+    assert mg.match_transaction(t, [tx(instrument="Gold")]) is None                                     # another market
+    assert mg.match_transaction(t, [tx(size=0.02)]) is None                                             # another size
+    assert mg.match_transaction(t, [tx(open_level=11100.0)]) is None                                    # another entry level
+    assert mg.match_transaction(t, [tx(opened_utc="2026-11-12T12:00:00")]) is None                      # opened three hours away
+    near, far = tx(opened_utc="2026-11-12T09:00:20", close_level=1.0), tx(opened_utc="2026-11-12T09:30:00", close_level=2.0)
+    assert mg.match_transaction(t, [far, near])["close_level"] == 1.0                                   # the nearest in time wins
+    assert mg.match_transaction(t, [tx(closed_utc=None, opened_utc=None)]) is not None                  # missing times fall back to market, size and level
+
+
+def test_exit_reasons_for_server_side_closes():
+    t = trade_row()
+    assert mg.infer_exit_reason(t, 10900.0) == "stop (closed by IG)"
+    assert mg.infer_exit_reason(t, 11199.0) == "target (closed by IG)"
+    assert mg.infer_exit_reason(t, 11050.0) == "closed outside a session"
+    assert mg.infer_exit_reason(trade_row(target=None), 11200.0) == "closed outside a session"
+
+
+def test_reconcile_finds_the_trades_ig_no_longer_holds_and_unknown_positions():
+    held = pos()                                                                                          # D1 still open
+    other = Position("D2", EPIC, "EUR/USD", "BUY", 0.01, 11000.0, 10900.0, None, 11050.0, 11051.0, 0.5)
+    plan = mg.reconcile_plan([trade_row(deal_id="D1"), trade_row(id=2, deal_id="D3")], [held, other], [tx()])
+    assert [i["trade"]["deal_id"] for i in plan["closed"]] == ["D3"] and plan["closed"][0]["reason"] == "stop (closed by IG)"
+    assert [p.deal_id for p in plan["unknown_positions"]] == ["D2"]
+    empty = mg.reconcile_plan([trade_row(deal_id="D1")], [held], [])
+    assert empty == {"closed": [], "unknown_positions": []}
+
+
+def test_applying_a_reconcile_closes_the_journal_trade_with_the_reason_and_the_observed_range(tmp_path):
+    j = Journal(tmp_path / "j.db")
+    open_trade(j)
+    row = j.open_trades()[0]
+    plan = mg.reconcile_plan([row], [], [tx(opened_utc=row["opened_at"].replace("+00:00", ""))])
+    out = mg.apply_reconcile(j, plan, {"D1": [0.4, 1.2, -0.3]}, NOW)
+    assert "recorded as closed at 10900" in out[0] and "stop (closed by IG)" in out[0]
+    closed = j.closed_trades()[0]
+    assert closed["exit"] == 10900.0 and closed["exit_reason"] == "stop (closed by IG)" and closed["r_multiple"] == pytest.approx(-1.0)
+    assert "best +1.20R and worst -0.30R seen at 3 check(s)" in closed["notes"] and "£-1.00" in closed["notes"]
+    assert j.open_trades() == []
+
+
+def test_an_unmatched_close_is_reported_not_guessed(tmp_path):
+    j = Journal(tmp_path / "j.db")
+    open_trade(j)
+    plan = mg.reconcile_plan(j.open_trades(), [], [])
+    out = mg.apply_reconcile(j, plan, {}, NOW)
+    assert "no matching closed deal was found" in out[0] and len(j.open_trades()) == 1                    # left open on record: a human must check
+
+
+def test_excursion_note_wording():
+    assert "no position checks" in mg.excursion_note([])
+    assert mg.excursion_note([0.5]) == "best +0.50R and worst +0.50R seen at 1 check(s) (coarse: only moments when a session looked)"
+
+
+def test_transactions_are_normalised_by_the_client(tmp_path):
+    class S(Session):
+        def request(self, method, url, headers=None, params=None, json=None, timeout=None):
+            path = url[len("https://demo-api.ig.com/gateway/deal"):]
+            if path == "/history/transactions":
+                self.calls.append({"method": method, "path": path, "params": params})
+                return Resp({"transactions": [{"instrumentName": "EUR/USD", "openLevel": "11000.5", "closeLevel": "10900", "size": "-0.01", "profitAndLoss": "£-1.00",
+                                               "dateUtc": "2026-11-12T14:00:00", "openDateUtc": "2026-11-12T09:00:20", "reference": "X", "transactionType": "DEAL"}]})
+            return super().request(method, url, headers, params, json, timeout)
+
+    from datetime import date
+    s = S()
+    c = IGClient(CREDS, session=s, cache=PriceCache(tmp_path))
+    got = c.get_transactions(date(2026, 11, 12))
+    assert got == [{"instrument": "EUR/USD", "open_level": 11000.5, "close_level": 10900.0, "size": 0.01, "pnl_text": "£-1.00", "closed_utc": "2026-11-12T14:00:00",
+                    "opened_utc": "2026-11-12T09:00:20", "reference": "X", "type": "DEAL"}]
