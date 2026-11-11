@@ -11,6 +11,7 @@ from ig_swing.context import ContextRules, assess, plan_context_reductions, stre
 from ig_swing.ig_client import Position
 from ig_swing.inputs import CrossAssetInput
 from ig_swing.news import Headline, select_headlines
+from ig_swing.news_view import make_view
 from ig_swing.risk import EntryProposal, KillSwitch, RiskEngine, AccountState
 
 NOW = datetime(2026, 11, 11, 10, 0, tzinfo=timezone.utc)
@@ -112,3 +113,38 @@ def test_engine_applies_vetoes_and_halving(tmp_path):
     # a factor above 1 can never enlarge a trade
     big = engine.evaluate_entry(EntryProposal("IX", "BUY", 10.0, 0.01, 1.0, size_factor=5.0), acct, [], [], NOW)
     assert big.size == full.size
+
+
+def view(direction, confidence):
+    return make_view(direction, confidence, ["Oil shock lifts inflation fears"], NOW)
+
+
+def test_high_confidence_adverse_view_vetoes_only_the_adverse_direction():
+    v = assess("BUY", calm(), [], view=view("BEARISH", "HIGH"))
+    assert v.vetoes and "news_view" in v.drivers and "Oil shock" in v.vetoes[0]
+    assert assess("SELL", calm(), [], view=view("BEARISH", "HIGH")).vetoes == ()     # supportive: no brake
+    assert assess("SELL", calm(), [], view=view("BULLISH", "HIGH")).vetoes
+    assert assess("BUY", calm(), [], view=view("BULLISH", "HIGH")).vetoes == ()
+
+
+def test_medium_adverse_view_halves_and_low_or_neutral_is_a_note():
+    m = assess("BUY", calm(), [], view=view("BEARISH", "MEDIUM"))
+    assert m.vetoes == () and m.size_factor == 0.5 and "news_view" in m.drivers
+    for d, c in (("BEARISH", "LOW"), ("NEUTRAL", "HIGH"), ("BULLISH", "HIGH")):
+        v = assess("BUY", calm(), [], view=view(d, c))
+        assert v.vetoes == () and v.size_factor == 1.0 and v.drivers == () and v.notes
+
+
+def test_a_view_replaces_the_word_count_rule_but_never_loosens_a_price_veto():
+    three = heads("Stocks plunge", "Markets tumble", "War fears grow")
+    assert assess("BUY", calm(), three).size_factor == 0.5                                # fallback: word count halves
+    v = assess("BUY", calm(), three, view=view("NEUTRAL", "HIGH"))
+    assert v.size_factor == 1.0 and any("note only" in n for n in v.notes)               # view in use: words are a note
+    spiked = assess("BUY", calm(vix=15), [], view=view("BULLISH", "HIGH"))
+    assert spiked.vetoes                                                                   # a bullish view cannot lift the VIX veto
+
+
+def test_adverse_view_proposes_trimming_a_position():
+    out = plan_context_reductions([position()], calm(), [], 0.01, view=view("BEARISH", "HIGH"))
+    assert len(out) == 1 and out[0].close_size == 0.02
+    assert plan_context_reductions([position("SELL")], calm(), [], 0.01, view=view("BEARISH", "HIGH")) == []

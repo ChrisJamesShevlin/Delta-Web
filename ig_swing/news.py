@@ -28,6 +28,12 @@ RSS_FEEDS = (
     ("Federal Reserve", "https://www.federalreserve.gov/feeds/press_all.xml"),
     ("Bank of England", "https://www.bankofengland.co.uk/rss/news"),
     ("ECB", "https://www.ecb.europa.eu/rss/press.xml"),
+    # Added 2026-11-11 after a read-only test: each returned fresh items. Yahoo Finance's feed was a 404.
+    ("Google News S&P 500", "https://news.google.com/rss/search?q=%22S%26P+500%22+when:1d&hl=en-US&gl=US&ceid=US:en"),
+    ("Google News Fed/oil", "https://news.google.com/rss/search?q=Fed+OR+oil+OR+Wall+Street+when:1d&hl=en-US&gl=US&ceid=US:en"),
+    ("Nasdaq", "https://www.nasdaq.com/feed/rssoutbound?category=Markets"),
+    ("Investing.com", "https://www.investing.com/rss/news_25.rss"),
+    ("Guardian Business", "https://www.theguardian.com/uk/business/rss"),
 )
 
 KEYWORDS = (
@@ -90,10 +96,11 @@ def fetch_finnhub_general(session: Any, api_key: str) -> list[Headline]:
 
 
 def _dedupe_key(title: str) -> str:
+    title = re.sub(r"\s+[-\u2013|]\s+[^-\u2013|]{2,40}$", "", title)  # Google News appends " - Publisher"
     return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
 
 
-def select_headlines(items: list[Headline], now: datetime, lookback_hours: float = 12, max_items: int = 15) -> list[Headline]:
+def select_headlines(items: list[Headline], now: datetime, lookback_hours: float = 12, max_items: int = 25) -> list[Headline]:
     """Fresh, market-relevant, de-duplicated headlines, newest first."""
     cutoff = now - timedelta(hours=lookback_hours)
     seen: set[str] = set()
@@ -111,7 +118,7 @@ def select_headlines(items: list[Headline], now: datetime, lookback_hours: float
     return out
 
 
-def load_headlines(session: Any, finnhub_key: str | None, now: datetime, lookback_hours: float = 12, max_items: int = 15) -> tuple[list[Headline], list[str]]:
+def load_headlines(session: Any, finnhub_key: str | None, now: datetime, lookback_hours: float = 12, max_items: int = 25) -> tuple[list[Headline], list[str]]:
     """Fetch every source. One failing source never stops the others."""
     notes: list[str] = []
     items: list[Headline] = []

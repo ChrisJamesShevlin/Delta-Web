@@ -122,3 +122,11 @@ def test_briefing_layout_uk_time_and_notes():
 def test_briefing_with_nothing_says_none_found():
     text = format_briefing(NOW, [], [], [])
     assert text.count("none found") == 3
+
+
+def test_publisher_suffix_does_not_defeat_dedupe():
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 11, 10, 0, tzinfo=timezone.utc)
+    items = [Headline("Fed holds rates steady - Reuters", now, "Google News"), Headline("Fed holds rates steady - CNBC", now, "Google News"),
+             Headline("Fed holds rates steady", now, "CNBC")]
+    assert len(select_headlines(items, now)) == 1

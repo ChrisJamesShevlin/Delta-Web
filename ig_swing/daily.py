@@ -9,6 +9,7 @@ Uses up to 120 points of the weekly price allowance (cached for 6 hours).
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -18,6 +19,8 @@ from .events import Event
 from .ig_client import Position
 from .inputs import CrossAssetInput
 from .news import Headline
+from .news_view import NewsView, format_view, load_view
+from .sentiment import Backdrop, backdrop_snapshot, format_backdrop, load_backdrop
 from .journal import Journal
 from .risk import AccountState, Decision, EntryProposal, ReductionProposal, RiskEngine, plan_event_reductions
 from .strategy import Signal, StrategyParams, generate_signal
@@ -37,6 +40,9 @@ class Plan:
     context: ContextVerdict | None = None
     reductions: list[ReductionProposal] = field(default_factory=list)
     insufficient_history: bool = False
+    view: NewsView | None = None
+    view_note: str = ""
+    backdrop: Backdrop = field(default_factory=dict)
 
 
 def build_plan(
@@ -54,6 +60,9 @@ def build_plan(
     headlines: list[Headline] | None,
     bars: int = BARS,
     history_epic: str | None = None,
+    view: NewsView | None = None,
+    view_note: str = "",
+    backdrop: Backdrop | None = None,
 ) -> Plan:
     notes: list[str] = []
     ts = now.isoformat()
@@ -73,7 +82,14 @@ def build_plan(
 
     rules = client.get_market_rules(epic)
     reductions = plan_event_reductions(positions, events, now, rules.min_deal_size)
-    reductions += plan_context_reductions(positions, inputs, headlines, rules.min_deal_size)
+    reductions += plan_context_reductions(positions, inputs, headlines, rules.min_deal_size, view=view)
+    # Archive exactly what the context layer saw, so the news layer can be tested on real history later.
+    journal.record_event(ts, "news_snapshot", json.dumps({
+        "headlines": [{"title": h.title, "source": h.source, "published": h.published.isoformat() if h.published else None} for h in (headlines or [])],
+        "inputs": [{"name": i.name, "pct_change": i.pct_change} for i in (inputs or [])],
+        "backdrop": backdrop_snapshot(backdrop or {}),
+        "view": view.to_json() if view else None,
+    }))
     for r in reductions:
         journal.record_event(ts, "reduction_proposed", f"{r.deal_id}: close {r.close_size}: {r.reason}")
 
@@ -83,13 +99,13 @@ def build_plan(
         why = f"insufficient history: {len(df)} of {strat.min_bars} bars"
         notes.append(why)
         journal.record_decision(ts, epic, None, None, False, 0.0, [why], {"equity": equity, "bars": len(df)})
-        return Plan(None, None, account, positions, notes, None, reductions, insufficient_history=True)
+        return Plan(None, None, account, positions, notes, None, reductions, True, view, view_note, backdrop or {})
     signal = generate_signal(df, strat)
     if signal is None:
         journal.record_decision(ts, epic, None, None, False, 0.0, ["no signal"], {"equity": equity, "bars": len(df)})
-        return Plan(None, None, account, positions, notes, None, reductions)
+        return Plan(None, None, account, positions, notes, None, reductions, False, view, view_note, backdrop or {})
 
-    context = assess(signal.direction, inputs, headlines)
+    context = assess(signal.direction, inputs, headlines, view=view)
     proposal = EntryProposal(epic, signal.direction, signal.stop_distance, rules.min_deal_size, rules.min_stop_distance,
                              size_factor=context.size_factor, vetoes=context.vetoes)
     decision = engine.evaluate_entry(proposal, account, positions, events, now)
@@ -97,7 +113,7 @@ def build_plan(
                             {"equity": equity, "stop_distance": signal.stop_distance, "target_distance": signal.target_distance,
                              "reason": signal.reason, "size_factor": context.size_factor, "drivers": list(context.drivers),
                              "context_notes": list(context.notes)})
-    return Plan(signal, decision, account, positions, notes, context, reductions)
+    return Plan(signal, decision, account, positions, notes, context, reductions, False, view, view_note, backdrop or {})
 
 
 def format_plan(plan: Plan) -> str:
@@ -105,6 +121,8 @@ def format_plan(plan: Plan) -> str:
     lines = [f"Equity £{a.equity:.2f} (start of day £{a.start_of_day_equity:.2f}, start of week £{a.start_of_week_equity:.2f})",
              f"Open positions: {len(plan.positions)}"]
     lines += [f"  {n}" for n in plan.notes]
+    lines.append(format_view(plan.view) if plan.view else plan.view_note)
+    lines += [l for l in format_backdrop(plan.backdrop) if l]
     if plan.insufficient_history:
         lines.append("Signal: NOT CHECKED (not enough price history).")
     elif plan.signal is None:
@@ -148,10 +166,12 @@ def main() -> int:
         epic = "IX.D.SPTRD.MONTH1.IP"
         inputs, input_notes = load_inputs(client)
         headlines, news_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now)
-        event_notes = event_notes + input_notes + news_notes
+        backdrop, backdrop_notes = load_backdrop(session, optional_key("FRED_API_KEY"))
+        view, view_note = load_view(now)
+        event_notes = event_notes + input_notes + news_notes + backdrop_notes
         plan = build_plan(client, Journal(), engine, StrategyParams(), epic=epic, account_id=creds.account_id,
                           env=env, events=events, now=now, inputs=inputs, headlines=headlines,
-                          history_epic=HISTORY_EPIC)
+                          history_epic=HISTORY_EPIC, view=view, view_note=view_note, backdrop=backdrop)
     except Exception as exc:  # type name only: messages can carry sensitive detail
         print(f"FAILED: {type(exc).__name__}")
         return 1

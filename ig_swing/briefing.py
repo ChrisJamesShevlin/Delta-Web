@@ -17,6 +17,8 @@ from .events import HIGH, MEDIUM, Event, load_events
 from .ig_client import IGClient
 from .inputs import CrossAssetInput, load_inputs
 from .news import Headline, load_headlines
+from .news_view import format_view, load_view
+from .sentiment import Backdrop, format_backdrop, load_backdrop
 
 UK = ZoneInfo("Europe/London")
 UTC = timezone.utc
@@ -37,6 +39,8 @@ def format_briefing(
     notes: list[str],
     days: int = DAYS_AHEAD,
     inputs: list[CrossAssetInput] | None = None,
+    backdrop: Backdrop | None = None,
+    view_text: str = "",
 ) -> str:
     today = now_utc.astimezone(UK).date()
     horizon = today + timedelta(days=days)
@@ -48,6 +52,10 @@ def format_briefing(
             pct = "n/a" if i.pct_change is None else f"{i.pct_change:+.2f}%"
             lines.append(f"  {i.name:16} {pct:>8}  {i.direction or 'n/a':5}  [{i.status}]")
         lines.append("")
+
+    lines += format_backdrop(backdrop or {})
+    if view_text:
+        lines += [view_text, ""]
 
     upcoming = [e for e in events if today <= e.day <= horizon]
     for tier, title in ((HIGH, "High impact"), (MEDIUM, "Medium impact")):
@@ -77,7 +85,10 @@ def main() -> int:
     events, event_notes = load_events(session, now.date(), now.date() + timedelta(days=DAYS_AHEAD), optional_key("FRED_API_KEY"))
     headlines, news_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, LOOKBACK_HOURS)
     inputs, input_notes = _load_ig_inputs()
-    print(format_briefing(now, events, headlines, input_notes + event_notes + news_notes, inputs=inputs))
+    backdrop, backdrop_notes = load_backdrop(session, optional_key("FRED_API_KEY"))
+    view, view_note = load_view(now)
+    print(format_briefing(now, events, headlines, input_notes + event_notes + news_notes + backdrop_notes, inputs=inputs,
+                          backdrop=backdrop, view_text=format_view(view) if view else view_note))
     return 0
 
 

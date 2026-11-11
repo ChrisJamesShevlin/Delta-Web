@@ -10,7 +10,12 @@ Rules (all untested hypotheses, pre-registered here, and logged as the trade
 - BUY is vetoed when the VIX is up by the spike threshold or more (risk-off).
 - SELL is vetoed when the VIX is down by the spike threshold or more (vol collapse, rally).
 - BUY is vetoed when oil is up by the oil threshold or more (the "oil shock" idea).
-- BUY size is halved when several fresh headlines carry stress words.
+- News view (see ig_swing.news_view), when a valid one exists. It is adverse to
+  a BUY if BEARISH and adverse to a SELL if BULLISH. HIGH confidence adverse:
+  veto. MEDIUM adverse: size halved. LOW, NEUTRAL or supportive: a note only.
+  A view never starts a trade and never loosens any other rule.
+- Fallback when there is no valid view: BUY size is halved when several fresh
+  headlines carry stress words. With a view, stress words only add a note.
 - Gold only adds a note. Its meaning is ambiguous on its own.
 - Missing VIX or oil data vetoes every entry: we cannot confirm the backdrop.
 
@@ -30,6 +35,7 @@ from dataclasses import dataclass
 from .ig_client import Position
 from .inputs import CrossAssetInput
 from .news import Headline
+from .news_view import NewsView
 from .risk import ReductionProposal, _floor_to_step
 
 VIX, OIL, GOLD = "VIX", "Oil (US crude)", "Gold"
@@ -74,8 +80,12 @@ def _by_name(inputs: list[CrossAssetInput]) -> dict[str, CrossAssetInput]:
     return {i.name: i for i in inputs if i.pct_change is not None}
 
 
-def assess(direction: str, inputs: list[CrossAssetInput] | None, headlines: list[Headline] | None, rules: ContextRules = ContextRules()) -> ContextVerdict:
-    """Context verdict for a BUY or SELL. Pure: same inputs, same answer."""
+def assess(direction: str, inputs: list[CrossAssetInput] | None, headlines: list[Headline] | None, rules: ContextRules = ContextRules(),
+           view: NewsView | None = None) -> ContextVerdict:
+    """Context verdict for a BUY or SELL. Pure: same inputs, same answer.
+
+    ``view`` must already be unexpired: ig_swing.news_view.load_view checks that.
+    """
     if inputs is None or headlines is None:
         return ContextVerdict(direction, vetoes=("context not loaded: cross-asset data and headlines are required",))
     have = _by_name(inputs)
@@ -103,7 +113,21 @@ def assess(direction: str, inputs: list[CrossAssetInput] | None, headlines: list
 
     factor = 1.0
     stress = stress_headlines(headlines)
-    if direction == "BUY" and len(stress) >= rules.stress_halve_count:
+    if view is not None:
+        why = "; ".join(view.reasons)
+        adverse = (direction == "BUY" and view.direction == "BEARISH") or (direction == "SELL" and view.direction == "BULLISH")
+        if adverse and view.confidence == "HIGH":
+            vetoes.append(f"news view {view.direction} (high confidence): {why}")
+            drivers.append("news_view")
+        elif adverse and view.confidence == "MEDIUM":
+            factor = rules.halve_factor
+            notes.append(f"news view {view.direction} (medium confidence), size halved: {why}")
+            drivers.append("news_view")
+        else:
+            notes.append(f"news view {view.direction} ({view.confidence}): {why}")
+        if stress:
+            notes.append(f"{len(stress)} stress headline(s) in the window (note only, a news view is in use)")
+    elif direction == "BUY" and len(stress) >= rules.stress_halve_count:
         factor = rules.halve_factor
         notes.append(f"{len(stress)} stress headlines in the window: long size halved")
         drivers.append("headline_stress")
@@ -120,6 +144,7 @@ def plan_context_reductions(
     min_size: float,
     rules: ContextRules = ContextRules(),
     step: float = 0.01,
+    view: NewsView | None = None,
 ) -> list[ReductionProposal]:
     """Propose halving positions the current backdrop argues against. Proposals only.
 
@@ -130,7 +155,7 @@ def plan_context_reductions(
         return []
     out = []
     for p in positions:
-        v = assess(p.direction, inputs, headlines, rules)
+        v = assess(p.direction, inputs, headlines, rules, view)
         if not v.drivers:  # only genuine signals, not the missing-data veto
             continue
         close = _floor_to_step(p.size / 2, step)

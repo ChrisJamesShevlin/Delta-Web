@@ -308,3 +308,26 @@ def test_history_can_come_from_a_different_epic(tmp_path):
     build_plan(C(bars([100.0] * 100)), Journal(tmp_path / "j.db"), engine, StrategyParams(), epic=EPIC, account_id="A", env="live",
                events=[], now=NOW, inputs=CALM, headlines=[], history_epic="HIST")
     assert seen == ["HIST"]
+
+
+def test_plan_archives_what_the_context_layer_saw_and_uses_the_view(tmp_path):
+    import json
+    from datetime import timedelta
+    from ig_swing.news_view import make_view
+    from ig_swing.news import Headline
+    view = make_view("BEARISH", "HIGH", ["Oil shock"], NOW)
+    engine = RiskEngine(LIVE_TEST, KillSwitch(tmp_path / "ks.json"))
+    j = Journal(tmp_path / "j.db")
+    p = build_plan(PlanClient(bars(np.linspace(100, 200, 100))), j, engine, StrategyParams(), epic=EPIC, account_id="ACC1", env="live",
+                   events=[], now=NOW, inputs=CALM, headlines=[Headline("Oil jumps", NOW, "t")], view=view, backdrop={})
+    assert p.signal.direction == "BUY" and not p.decision.allowed and any("news view BEARISH" in r for r in p.decision.reasons)
+    snap = json.loads(next(e for e in j.events() if e["kind"] == "news_snapshot")["detail"])
+    assert snap["headlines"][0]["title"] == "Oil jumps" and snap["view"]["direction"] == "BEARISH"
+    assert "News view: BEARISH" in format_plan(p)
+
+
+def test_plan_says_why_there_is_no_view(tmp_path):
+    engine = RiskEngine(LIVE_TEST, KillSwitch(tmp_path / "ks.json"))
+    p = build_plan(PlanClient(bars([100.0] * 100)), Journal(tmp_path / "j.db"), engine, StrategyParams(), epic=EPIC, account_id="A",
+                   env="live", events=[], now=NOW, inputs=CALM, headlines=[], view=None, view_note="news view: none recorded (word-count fallback in use)")
+    assert "none recorded" in format_plan(p)
