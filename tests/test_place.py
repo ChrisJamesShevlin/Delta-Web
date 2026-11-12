@@ -167,3 +167,18 @@ def test_uncalibrated_stake_is_the_minimum_and_kelly_only_filters(tmp_path):
     assert pl["allowed"] and pl["stake"] == 0.01              # minimum stake, not the Kelly size
     c, j, e, bad = plan(tmp_path, 0.20)
     assert not bad["allowed"]                                  # Kelly still vetoes a negative bet
+
+
+def test_the_order_sent_to_ig_has_the_planned_stake_not_the_full_ceiling_size(tmp_path):
+    c, j, e, pl = plan(tmp_path, 0.36)
+    assert pl["stake"] == 0.01                                   # minimum stake until calibrated (the ceiling would allow 0.04)
+    r = place.execute(c, j, e, pl, ACCT, NOW, pl["token"], "t", "trend")
+    assert r["placed"] and c.calls[0][1]["size"] == 0.01
+
+
+def test_a_size_that_differs_from_the_confirmed_plan_is_not_placed(tmp_path):
+    c, j, e, pl = plan(tmp_path, 0.36)
+    pl = dict(pl, stake=0.05)                                    # the plan claims a stake the engine would not size
+    pl["token"] = place.token_for(pl["market"], pl["direction"], 0.05, pl["stop"], pl["target"])
+    r = place.execute(c, j, e, pl, ACCT, NOW, pl["token"], "t", "trend")
+    assert not r["placed"] and c.calls == []

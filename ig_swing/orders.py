@@ -62,6 +62,7 @@ class OrderService:
         driver: str = "",
         thesis: str = "",
         invalidation: str = "",
+        expect_size: float | None = None,
     ) -> OrderResult:
         ts = now.isoformat()
         rules = self.client.get_market_rules(epic)
@@ -76,6 +77,10 @@ class OrderService:
                                       "size_factor": context.size_factor, "context_notes": list(context.notes)})
         if not decision.allowed:
             return OrderResult(False, "refused by risk rules", decision.reasons)
+        if expect_size is not None and abs(decision.size - expect_size) > 1e-9:
+            reason = f"size {decision.size:g} differs from the confirmed plan {expect_size:g}: not placed"
+            self.journal.record_event(ts, "size_mismatch", reason)
+            return OrderResult(False, "size differs from the confirmed plan", (reason,))
 
         text = (
             f"{direction} {market} ({epic}, {expiry})\n"

@@ -67,7 +67,7 @@ def plan_order(client: Any, journal: Any, engine: RiskEngine, market: str, direc
         "market": market, "epic": epic, "direction": direction.upper(), "stop": stop, "target": target, "reward_risk": rr, "p_win": p_win,
         "kelly": kelly, "kelly_eighth_pct": 100 * KELLY_FRACTION * kelly, "risk_pct_target": risk_pct, "calibrated": calibrated,
         "decision": decision, "reasons": reasons, "allowed": decision.allowed and not (risk_pct <= 0 and not ignore_kelly),
-        "stake": stake, "entry": entry, "price": price, "spread": rules.offer - rules.bid, "margin": stake * price * margin_pct / 100,
+        "stake": stake, "size_factor": max(factor, 0.01), "entry": entry, "price": price, "spread": rules.offer - rules.bid, "margin": stake * price * margin_pct / 100,
         "token": token_for(market, direction, stake, stop, target) if stake else "",
     }
 
@@ -98,7 +98,7 @@ def execute(client: Any, journal: Any, engine: RiskEngine, plan: dict[str, Any],
     svc = OrderService(client, engine, journal, confirm=lambda text: shown.append(text) or True, env=env)
     res = svc.submit_entry(
         epic=plan["epic"], expiry="DFB", market=plan["market"], direction=plan["direction"], stop_distance=plan["stop"], target_distance=plan["target"],
-        setup=playbook, account=account, events=[], now=now, context=ContextVerdict(plan["direction"], size_factor=1.0),
+        setup=playbook, account=account, events=[], now=now, context=ContextVerdict(plan["direction"], size_factor=plan["size_factor"]), expect_size=plan["stake"],
         driver="challenge", thesis=thesis, invalidation=f"stop {plan['stop']:g} points",
     )
     return {"placed": res.placed, "status": res.status, "reasons": res.reasons, "deal_id": res.deal_id, "size": res.size, "stop_level": res.stop_level}
