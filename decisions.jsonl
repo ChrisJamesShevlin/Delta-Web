@@ -1,2 +1,3 @@
 {"allowed": 0, "context": "{\"equity\": 15.57, \"bars\": 51}", "direction": null, "epic": "IX.D.SPTRD.MONTH1.IP", "id": 1, "reasons": "[\"no signal\"]", "setup": null, "size": 0.0, "ts": "2026-11-11T16:52:57.738006+00:00"}
 {"allowed": 0, "context": "{\"equity\": 15.57, \"bars\": 120}", "direction": null, "epic": "IX.D.SPTRD.MONTH1.IP", "id": 2, "reasons": "[\"no signal\"]", "setup": null, "size": 0.0, "ts": "2026-11-11T16:59:35.394776+00:00"}
+{"allowed": 1, "context": "{\"stop_distance\": 490.0, \"target_distance\": 980.0, \"equity\": 50.0, \"size_factor\": 1.0, \"context_notes\": []}", "direction": "SELL", "epic": "UC.D.NVDA.DAILY.IP", "id": 3, "reasons": "[]", "setup": "event_reaction", "size": 0.01, "ts": "2026-11-12T08:59:39.083650+00:00"}
