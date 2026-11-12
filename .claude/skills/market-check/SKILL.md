@@ -56,7 +56,7 @@ For every idea you would seriously consider, record it with `python3 -m ig_swing
 - The tool prints the 1/8 Kelly stake. If Kelly says do not trade, the idea stays shadow-only. Since 2026-11-12 the live stake is the market's minimum stake until my probabilities are calibrated (Kelly is then a skip filter only).
 
 ## 4. The live candidate (at most one per check): place it yourself
-The account exists to gather data (user, 2026-11-12), so do not hold back a valid trade for lack of conviction: if every condition below holds, place the best idea even at LOW confidence and say plainly that it is a low-conviction data trade. The conditions are the limit, not a feeling that the idea is not good enough. Do not inflate `--p-win` to pass Kelly, and never use `--ignore-kelly`.
+The account exists to gather data (user, 2026-11-12), but a live trade needs a genuine, confident directional view: never a guess, never a coin flip, and never a win chance raised to pass Kelly. When you do have that view and every condition below holds, place it without holding back out of excess caution. With no view, record shadow ideas and do not trade. Never use `--ignore-kelly`.
 The user's standing instruction (2026-11-11, for the £45 challenge account only): place orders as part of this skill without asking each time. So do not wait for a yes. The guardrails in code still apply and are not negotiable.
 
 Place it only if ALL of these hold:
