@@ -49,6 +49,12 @@ Record how deep you went with `--research none|headlines|web` and the sources yo
 - Open positions, the £15 floor, the cooldown after two losses, and the drawdown brake. Read the equity line.
 - For a sudden drop, the honest answer is often "no trade". Fading and following a spike both lack a validated edge: if you cannot pick a side with a stated reason, record NO idea (never both directions: one always loses and the record then looks like a coin flip), and leave a `manage note` saying why. Only record an idea you would back. If an idea was recorded without a real view, tag it with `python3 -m ig_swing.challenge exclude --idea-id N --reason "..."` so it stays out of the results.
 
+## 2b. Price-setup scan (fixed criteria, no news needed; added 2026-11-12, see RULE_CHANGELOG.md)
+Go down the briefing's range-position column every check. Do not wait for a news story.
+- **Breakout or breakdown** (playbook `trend`): range position above 100% means a long, below 0% a short, provided IG clients are not already 70% or more positioned the same way. The stop is about 1.3 ATR, the target twice the stop, horizon 5 days.
+- **Fade** (playbook `other`): a move of more than 2 ATRs with no cause found after a search, traded against the move.
+- Each trigger is an idea with an honest `--p-win` (about 0.36 at 2 to 1: momentum evidence is thin, never raise it to pass Kelly). Markets that do not fit the account are recorded as shadow ideas. Take at most one live per check, the cleanest one, if the guardrails pass. Say plainly when several triggers are the same bet (indices together, dollar pairs together). Do not change the criteria after seeing results.
+
 ## 3. Write the ideas (zero to three)
 For every idea you would seriously consider, record it with `python3 -m ig_swing.challenge idea --market ... --direction ... --stop <points> --target <points> --p-win <0.05 to 0.95> --playbook <event_reaction|news_thesis|earnings|trend|sentiment|other> --confidence <LOW|MEDIUM|HIGH> --thesis "<at most 300 characters>"`.
 - Aim for at least 2 to 1 reward to risk. Stops are in points from the entry. Use sensible stops (about 1 to 1.5 daily ranges), not stops sized to fit the account.
