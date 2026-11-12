@@ -1,0 +1,2 @@
+{"allowed": 0, "context": "{\"equity\": 15.57, \"bars\": 51}", "direction": null, "epic": "IX.D.SPTRD.MONTH1.IP", "id": 1, "reasons": "[\"no signal\"]", "setup": null, "size": 0.0, "ts": "2026-11-11T16:52:57.738006+00:00"}
+{"allowed": 0, "context": "{\"equity\": 15.57, \"bars\": 120}", "direction": null, "epic": "IX.D.SPTRD.MONTH1.IP", "id": 2, "reasons": "[\"no signal\"]", "setup": null, "size": 0.0, "ts": "2026-11-11T16:59:35.394776+00:00"}
