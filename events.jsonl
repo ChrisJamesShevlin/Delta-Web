@@ -31,3 +31,4 @@
 {"detail": "DIAAAASGXM59BAE: closed 0.06 (other: stake was £0.07 instead of the planned £0.01 because of a placement bug; trimmed to the planned stake)", "id": 31, "kind": "partial_close", "ts": "2026-11-12T11:44:23.505950+00:00"}
 {"detail": "{\"deal_id\": \"DIAAAASGXM59BAE\", \"r\": 0.08}", "id": 32, "kind": "position_check", "ts": "2026-11-12T11:44:24.573962+00:00"}
 {"detail": "{\"market\": \"AUD/USD\", \"saw\": \"trimmed 0.06 of 0.07 at 6827.8 (about +\\u00a30.33 banked on the trimmed part); remaining \\u00a30.01/pt, stop 6903.4, risk \\u00a30.70\", \"decision\": \"back to the planned minimum stake, keep the rest\"}", "id": 33, "kind": "check_note", "ts": "2026-11-12T11:44:36.112856+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASGXM59BAE\", \"r\": 0.096}", "id": 34, "kind": "position_check", "ts": "2026-11-12T11:57:57.367948+00:00"}
