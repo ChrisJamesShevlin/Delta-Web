@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from .macro import format_macro, load_macro
 from .techread import format_tech, long_read, tech_read
 
 UTC = timezone.utc
@@ -466,7 +467,8 @@ def stake_hint(equity: float, risk_pct: float, stop_pts: float, price: float, ma
 
 
 def format_briefing(now: datetime, rows: list[dict], equity: float, positions: int, notes: list[str], events_text: list[str], headlines_text: list[str],
-                    market_news: list[str] | None = None, earnings_text: list[str] | None = None) -> str:
+                    market_news: list[str] | None = None, earnings_text: list[str] | None = None,
+                    macro_text: list[str] | None = None) -> str:
     lines = [f"Challenge briefing, {now:%a %d %b %Y %H:%M} UTC. Equity £{equity:.2f}, open positions {positions}", ""]
     header = f"{'market':16} {'price':>9} {'day':>7} {'ATR pts':>8} {'ATR %':>6} {'20d range':>9} {'IG clients':>11} {'spread':>7}  stake for a 1.5 ATR stop at 10% risk"
     for cls in CLASS_ORDER:
@@ -491,6 +493,8 @@ def format_briefing(now: datetime, rows: list[dict], equity: float, positions: i
     shadow = [r["market"] for r in rows if not r["stake"]]
     lines.append(f"Fits the live account at 10% risk ({len(fits)}): " + (", ".join(fits) or "none"))
     lines.append(f"Shadow book only at this account size ({len(shadow)}): " + (", ".join(shadow) or "none"))
+    if macro_text:
+        lines += ["", "Macro backdrop (Yahoo, same day; context for currencies, gold and indices, no rule attached):"] + macro_text
     lines += ["", "Events, next 48 hours:"] + (events_text or ["  none found"])
     if earnings_text is not None:
         lines += ["", "Earnings in the next 3 days (shares on the list):"] + (earnings_text or ["  none found"])
@@ -985,7 +989,16 @@ def main(argv: list[str] | None = None) -> int:
                 market_news.append(f"  {r['market']}: {h.published:%H:%M} {h.title}")
         share_tickers = {t: n for n in ALL_MARKETS if (t := ticker_for(n, ALL_MARKETS[n][0]))}
         earnings_text = format_earnings(fetch_earnings(session, optional_key("FINNHUB_API_KEY"), now.date(), now.date() + timedelta(days=3)), set(share_tickers))
-        print(format_briefing(now, rows, acct.equity, len(client.get_positions()), notes + ev_notes + hd_notes, ev_text, hd_text, market_news, earnings_text))
+        macro = load_macro(session)
+        if macro:
+            try:
+                journal.record_event(now.isoformat(), "macro_backdrop", json.dumps(macro))
+            except Exception:
+                notes.append("archive: macro backdrop could not be written")
+        else:
+            notes.append("macro backdrop (Yahoo): unavailable")
+        print(format_briefing(now, rows, acct.equity, len(client.get_positions()), notes + ev_notes + hd_notes, ev_text, hd_text, market_news, earnings_text,
+                              format_macro(macro)))
         limits = risk_limits(env)
         print(f"Risk profile: {limits.name} (cap {limits.max_risk_per_trade_pct:g}% a trade = £{acct.equity * limits.max_risk_per_trade_pct / 100:.2f}, floor £{limits.min_equity_gbp:g}, max {limits.max_open_positions} positions)")
         return 0
