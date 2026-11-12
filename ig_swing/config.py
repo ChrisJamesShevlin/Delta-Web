@@ -67,7 +67,7 @@ CHALLENGE = RiskLimits(
     cooldown_hours=24.0,
     drawdown_brake_pct=25.0,
     drawdown_brake_factor=0.5,
-    max_new_trades_per_day=2,              # added when the user authorised the assistant to place orders without asking each time
+    max_new_trades_per_day=0,              # no daily cap (user removed it 2026-11-12; was 2). The open-positions, loss and cooldown limits remain.
 )
 
 

@@ -154,8 +154,10 @@ def test_events_are_listed_with_times_when_known_and_only_high_or_medium():
     assert len(lines) == 2 and "Fri 13 Nov 13:30Z" in lines[0] and "PPI" in lines[0] and "(time n/a)" in lines[1] and all("Minor" not in l for l in lines)
 
 
-def test_the_daily_cap_shows_up_in_the_plan(tmp_path):
+def test_the_daily_cap_shows_up_in_the_plan_when_one_is_set(tmp_path):
+    from dataclasses import replace
     c, j, e = make_env(tmp_path)
+    e.limits = replace(e.limits, max_new_trades_per_day=2)
     for _ in range(2):
         j.open_trade(opened_at=NOW.isoformat(), epic=EPIC, direction="BUY", size=0.01, entry=11000.0, stop=10900.0, risk_gbp=1.0, env="live")
     pl = place.plan_order(c, j, e, "EUR/USD", "SELL", 100.0, 200.0, 0.40, ACCT, NOW)
