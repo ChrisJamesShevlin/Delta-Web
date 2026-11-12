@@ -160,3 +160,10 @@ def test_the_daily_cap_shows_up_in_the_plan(tmp_path):
         j.open_trade(opened_at=NOW.isoformat(), epic=EPIC, direction="BUY", size=0.01, entry=11000.0, stop=10900.0, risk_gbp=1.0, env="live")
     pl = place.plan_order(c, j, e, "EUR/USD", "SELL", 100.0, 200.0, 0.40, ACCT, NOW)
     assert not pl["allowed"] and any("daily limit" in r for r in pl["reasons"])
+
+
+def test_uncalibrated_stake_is_the_minimum_and_kelly_only_filters(tmp_path):
+    c, j, e, pl = plan(tmp_path, 0.45)
+    assert pl["allowed"] and pl["stake"] == 0.01              # minimum stake, not the Kelly size
+    c, j, e, bad = plan(tmp_path, 0.20)
+    assert not bad["allowed"]                                  # Kelly still vetoes a negative bet

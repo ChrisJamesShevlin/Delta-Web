@@ -53,7 +53,7 @@ For every idea you would seriously consider, record it with `python3 -m ig_swing
 - Aim for at least 2 to 1 reward to risk. Stops are in points from the entry. Use sensible stops (about 1 to 1.5 daily ranges), not stops sized to fit the account.
 - `--p-win` must be honest. Typical is 0.35 to 0.45. Never above 0.5 without a strong, stated reason. Overconfidence is the thing the calibration report exists to catch.
 - Record the ideas the user will not take live too. Do not cherry-pick afterwards.
-- The tool prints the 1/8 Kelly stake. If Kelly says do not trade, the idea stays shadow-only.
+- The tool prints the 1/8 Kelly stake. If Kelly says do not trade, the idea stays shadow-only. Since 2026-11-12 the live stake is the market's minimum stake until my probabilities are calibrated (Kelly is then a skip filter only).
 
 ## 4. The live candidate (at most one per check): place it yourself
 The user's standing instruction (2026-11-11, for the £45 challenge account only): place orders as part of this skill without asking each time. So do not wait for a yes. The guardrails in code still apply and are not negotiable.
@@ -79,6 +79,8 @@ Say what you saw, what you recorded, what (if anything) is proposed live, and wh
 - **Run `python3 -m ig_swing.challenge review` about weekly, or when the user asks.** It compares my ideas with the dumb baseline on the same market and day, splits results by playbook, confidence, research depth and exit style, checks my stated probabilities against what happened, and shows closed live trades by exit reason. It says plainly when there are too few results.
 - **Never change a rule on fewer than about 30 results per playbook, and change one thing at a time.** Substantive changes to staking, limits or the guardrails need the user's explicit go. Every rule change gets a dated line in `RULE_CHANGELOG.md` before it takes effect, so results can be split into before and after, and a change is judged only on ideas written after it. Do not re-score old ideas to fit a tweak, do not slice results by many features on small numbers, and say how many variants have been tried.
 - Machine learning is a later question (about a year of data): any model must beat the baseline and my own judgement on data it has not seen, by a margin set in advance, and would only ever be a second vote.
+
+- **Back up the journal at the end of every check and session:** `python3 -m ig_swing.backup export --commit --push`. It writes plain text files to the separate private backup repo (`$IG_BACKUP_DIR`, default `../IG-Swing-backup`), never to this repo. If it says there is no remote, tell the user once; the backup is then local only. Restore on a new laptop with `python3 -m ig_swing.backup restore`.
 
 ## Never
 - Place an order outside the conditions in step 4, with `--ignore-kelly`, when the profile is not `challenge`, or on any account other than the challenge account.

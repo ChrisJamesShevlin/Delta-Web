@@ -10,7 +10,7 @@ authorisation of 2026-11-11 (no per-order yes) for the challenge account only, a
 challenge risk profile active. Changing the stake, stop, target, market or direction changes
 the token, so a different order can never go through on an old confirmation.
 
-Stake: 1/8 Kelly from --p-win and the stop and target distances (ig_swing.challenge), scaled below the profile's ceiling,
+Stake: the minimum stake until calibrated (Kelly only filters), then 1/8 Kelly from --p-win and the stop and target distances (ig_swing.challenge), scaled below the profile's ceiling,
 rounded down to the minimum stake step but never below the market's minimum, and checked by the risk engine (floor, cooldown,
 drawdown brake, loss limits, position limits, mandatory stop). If Kelly says do not trade, the command refuses unless
 --ignore-kelly is given, which is logged. News and event blackouts are not applied here: the challenge allows event plays.
@@ -50,7 +50,8 @@ def plan_order(client: Any, journal: Any, engine: RiskEngine, market: str, direc
     if risk_pct <= 0 and not ignore_kelly:
         reasons.append(f"Kelly says do not trade this: a {p_win:.0%} chance at {rr:.1f} to 1 has no positive stake after costs (use --ignore-kelly to override, logged)")
     ceiling = engine.limits.risk_per_trade_pct
-    factor = min(1.0, max(risk_pct, 0.0) / ceiling) if risk_pct > 0 else 0.01
+    # Staking rule of 2026-11-12: minimum stake until calibrated; Kelly is only a skip filter until then.
+    factor = min(1.0, max(risk_pct, 0.0) / ceiling) if (calibrated and risk_pct > 0) else 0.01
     positions = client.get_positions()
     proposal = EntryProposal(epic, direction.upper(), stop, rules.min_deal_size, rules.min_stop_distance, size_factor=max(factor, 0.01))
     svc = OrderService(client, engine, journal)
@@ -77,8 +78,8 @@ def describe(plan: dict[str, Any], equity: float) -> str:
         f"ORDER: {plan['direction']} {plan['market']} at about {plan['entry']:.1f}",
         f"  stake £{plan['stake']:.2f} a point, stop {plan['stop']:g} points, target {plan['target']:g} points (reward to risk {plan['reward_risk']:.1f})",
         f"  risk £{d.risk_gbp:.2f} ({d.risk_pct:.1f}% of £{equity:.2f}), margin about £{plan['margin']:.2f}, spread {plan['spread']:.1f} points",
-        f"  your stated chance {plan['p_win']:.0%}: full Kelly {plan['kelly'] * 100:.1f}%, 1/8 Kelly {plan['kelly_eighth_pct']:.1f}%, ceiling "
-        f"{'10%' if plan['calibrated'] else '5%'} until calibrated",
+        f"  your stated chance {plan['p_win']:.0%}: full Kelly {plan['kelly'] * 100:.1f}%, 1/8 Kelly {plan['kelly_eighth_pct']:.1f}%; "
+        + ("stake follows 1/8 Kelly (calibrated)" if plan["calibrated"] else "stake is the minimum until calibrated (Kelly is a skip filter only)"),
     ]
     lines += [f"  note: {n}" for n in d.notes]
     if plan["reasons"]:

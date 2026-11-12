@@ -448,4 +448,4 @@ def test_rule_changelog_date_and_the_review_text():
 
 def test_the_changelog_file_exists_and_is_parseable():
     text = open("RULE_CHANGELOG.md").read()
-    assert ch.last_rule_change(text) == "2026-11-11" and text.count("\n- 20") >= 4
+    assert ch.last_rule_change(text) == "2026-11-12" and text.count("\n- 20") >= 5
