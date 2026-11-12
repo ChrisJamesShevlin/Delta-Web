@@ -29,7 +29,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from .macro import format_macro, load_macro
-from .techread import format_tech, long_read, tech_read
+from .techread import format_tech, long_read, swing_levels, tech_read
 
 UTC = timezone.utc
 KIND = "challenge_idea"
@@ -720,9 +720,14 @@ def enrich_with_yahoo(session: Any, rows: list[dict], today: Any) -> int:
         if yb is None:
             continue
         lr = long_read(yb)
+        scaled = scale_to(yb, r["price"])
         if r.get("tech") is None:                      # a share: build the whole read from Yahoo bars rescaled to IG's price
-            scaled = scale_to(yb, r["price"])
-            r["tech"] = tech_read(scaled, r["price"]) if scaled is not None else None
+            r["tech"] = tech_read(scaled.tail(40).reset_index(drop=True), r["price"]) if scaled is not None else None
+        if r.get("tech") is not None and scaled is not None:
+            from .indicators import atr as _atr
+            sw = swing_levels(scaled, r["price"], float(_atr(scaled, 14).iloc[-1]))
+            if sw:
+                r["tech"]["swing"] = sw
         if r.get("tech") is not None and lr:
             r["tech"].update(lr)
             n += 1

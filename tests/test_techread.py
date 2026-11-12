@@ -6,6 +6,7 @@ import json
 import sqlite3
 
 import pandas as pd
+import pytest
 
 from ig_swing import techread
 from ig_swing.journal import Journal
@@ -88,3 +89,30 @@ def test_yahoo_loader_drops_today_uses_the_cache_and_fails_soft(tmp_path):
         assert yahoo_bars.load_daily(None, "OTHER", date(2026, 11, 12), cache=tmp_path, pause=0) is None
     finally:
         yahoo_bars.fetch_prices = orig
+
+
+def test_classic_pivot_points_by_hand():
+    pv = techread.pivots(110.0, 90.0, 100.0)
+    assert pv["P"] == 100.0 and pv["R1"] == 110.0 and pv["S1"] == 90.0 and pv["R2"] == 120.0 and pv["S2"] == 80.0
+    t = techread.tech_read(bars([100 + i for i in range(30)]), 130.0)
+    assert t["pivots"]["P"] == pytest.approx(129.0) and t["pivots"]["R1"] == pytest.approx(130.0)   # last bar: high 130, low 128, close 129
+    assert "pivots_5d" in t and "daily pivots" in techread.format_tech(t)
+
+
+def test_swing_levels_merge_touches_and_split_by_price():
+    # a range between 100 and 120 touched repeatedly: support near 100, resistance near 120
+    import math
+    closes = [110 + 10 * math.sin(i / 3.0) for i in range(120)]
+    b = pd.DataFrame({"close": closes, "high": [c + 0.5 for c in closes], "low": [c - 0.5 for c in closes], "open": closes})
+    sw = techread.swing_levels(b, 110.0, 2.0)
+    assert sw["support"] and sw["resistance"]
+    assert all(lv < 110 for lv, _ in sw["support"]) and all(lv > 110 for lv, _ in sw["resistance"])
+    assert sw["support"][0][1] >= 3 and sw["resistance"][0][1] >= 3             # several reactions merged into one level
+    assert techread.swing_levels(b.head(10), 110.0, 2.0) is None and techread.swing_levels(b, 110.0, 0) is None
+
+
+def test_the_levels_appear_in_the_formatted_read():
+    t = techread.tech_read(bars([100 + i for i in range(30)]), 130.0)
+    t["swing"] = {"support": [(120.0, 3)], "resistance": []}
+    text = techread.format_tech(t)
+    assert "swing support 120.0 (3x)" in text and "swing resistance none found" in text
