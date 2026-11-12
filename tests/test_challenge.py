@@ -110,8 +110,10 @@ def test_measure_and_report_state_sample_size_and_the_cap():
 
 
 def test_stake_hint_by_hand():
-    stake, note = ch.stake_hint(45.57, 10.0, 40.0, 11093.0, 3.33)                    # 10% = 4.557 over 40 points = 0.1139, limited by margin
-    assert stake == pytest.approx(0.07) and note == "margin-limited"
+    stake, note = ch.stake_hint(45.57, 10.0, 20.0, 11093.0, 3.33)                    # 10% = 4.557 over 20 points = 0.2278, limited by margin to the account
+    assert stake == pytest.approx(0.12) and note.startswith("margin-limited")
+    stake, note = ch.stake_hint(50.0, 10.0, 487.0, 16237.0, 20.0)                    # a share: minimum stake, 65% of equity as margin: allowed, with a warning
+    assert stake == 0.01 and "heavy margin 65% of equity" in note
     assert ch.stake_hint(45.57, 10.0, 400.0, 11093.0, 3.33) == (0.01, "")           # wide stop: the minimum stake
     assert ch.stake_hint(1.0, 10.0, 400.0, 11093.0, 3.33)[1] == "below the minimum stake"
 
@@ -276,7 +278,7 @@ def test_any_market_on_ig_can_be_resolved_by_search_words_name_or_epic():
 def test_the_fit_check_uses_the_live_margin_and_minimum_stake():
     big = {"name": "Apple", "epic": "UA.D.AAPL.DAILY.IP", "margin": 20.0, "min_stake": 0.01, "bid": 27000.0, "offer": 27020.0, "spread_pct": 0.07}
     small = {"name": "Uber", "epic": "UB.D.UBER.DAILY.IP", "margin": 20.0, "min_stake": 0.01, "bid": 8000.0, "offer": 8010.0, "spread_pct": 0.12}
-    assert "does NOT fit" in ch.fit_line(big, 45.57) and "£54.02" in ch.fit_line(big, 45.57)          # £270 exposure x 20% margin is over 60% of £45.57
+    assert "does NOT fit" in ch.fit_line(big, 45.57) and "£54.02" in ch.fit_line(big, 45.57)          # £270 exposure x 20% margin is more than the £45.57 account holds
     assert "fits the account" in ch.fit_line(small, 45.57)                                              # £80 exposure x 20% = £16
     assert "fits the account" in ch.fit_line(big, 500.0)                                                # the same market fits a bigger account
 

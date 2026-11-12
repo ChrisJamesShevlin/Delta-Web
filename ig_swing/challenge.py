@@ -423,8 +423,14 @@ def format_report(m: dict[str, Any]) -> str:
 # ---- the briefing ---------------------------------------------------------
 
 
-def stake_hint(equity: float, risk_pct: float, stop_pts: float, price: float, margin_pct: float, min_stake: float = 0.01, max_margin_share: float = 0.6) -> tuple[float, str]:
-    """Stake in pounds per point for the chosen risk, limited by margin. Returns (stake, note)."""
+HEAVY_MARGIN_SHARE = 0.6  # a warning level only; the hard limit is the account's own funds
+
+
+def stake_hint(equity: float, risk_pct: float, stop_pts: float, price: float, margin_pct: float, min_stake: float = 0.01, max_margin_share: float = 1.0) -> tuple[float, str]:
+    """Stake in pounds per point for the chosen risk, limited by margin. Returns (stake, note).
+
+    The hard limit is the account itself (IG rejects an order whose margin exceeds the funds); the code's risk engine sets no
+    smaller margin limit. A position that would tie up more than HEAVY_MARGIN_SHARE of equity gets a warning, not a refusal."""
     if stop_pts <= 0 or price <= 0:
         return 0.0, "no stop"
     stake = math.floor(equity * risk_pct / 100 / stop_pts / min_stake + 1e-9) * min_stake
@@ -435,6 +441,9 @@ def stake_hint(equity: float, risk_pct: float, stop_pts: float, price: float, ma
         note = ""
     if stake < min_stake:
         return 0.0, "below the minimum stake"
+    used = stake * price * margin_pct / 100 / equity if equity > 0 else 0.0
+    if used > HEAVY_MARGIN_SHARE:
+        note = (note + f" heavy margin {used:.0%} of equity").strip()
     return round(stake, 2), note
 
 
@@ -659,14 +668,15 @@ def resolve_market(client: Any, query: str) -> dict[str, Any]:
             "spread_pct": (snap.offer - snap.bid) / mid * 100}
 
 
-def fit_line(info: dict[str, Any], equity: float, max_margin_share: float = 0.6) -> str:
+def fit_line(info: dict[str, Any], equity: float, max_margin_share: float = 1.0) -> str:
     """Whether the minimum stake in this market can be held on the account, by margin."""
     mid = (info["bid"] + info["offer"]) / 2
     notional = info["min_stake"] * mid
     margin = notional * info["margin"] / 100
     fits = margin <= equity * max_margin_share
     return (f"{info['name']} [{info['epic']}]: price {mid:.1f}, spread {info['spread_pct']:.3f}%, minimum stake £{info['min_stake']:g}/pt = £{notional:.0f} exposure, "
-            f"margin {info['margin']:g}% = £{margin:.2f} -> " + ("fits the account" if fits else f"does NOT fit £{equity:.2f} (needs more than {max_margin_share:.0%} of equity as margin): shadow book only"))
+            f"margin {info['margin']:g}% = £{margin:.2f} -> " + (("fits the account" + (f", but heavy: {margin / equity:.0%} of equity as margin" if margin > equity * HEAVY_MARGIN_SHARE else ""))
+                                                                  if fits else f"does NOT fit £{equity:.2f} (the margin is more than the account holds): shadow book only"))
 
 
 def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.DataFrame, datetime], pd.DataFrame],
