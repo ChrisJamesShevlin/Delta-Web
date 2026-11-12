@@ -34,6 +34,35 @@ RSS_FEEDS = (
     ("Nasdaq", "https://www.nasdaq.com/feed/rssoutbound?category=Markets"),
     ("Investing.com", "https://www.investing.com/rss/news_25.rss"),
     ("Guardian Business", "https://www.theguardian.com/uk/business/rss"),
+    # Added 2026-11-12 after a read-only test of about 40 candidates (kept: reachable and at least 3 items in the last 24 hours). Reddit was
+    # tested and left out: it rate-limits scripts (HTTP 429 after the first request) and is chatter, not news.
+    ("BBC Business", "https://feeds.bbci.co.uk/news/business/rss.xml"),
+    ("Sky News Business", "https://feeds.skynews.com/feeds/rss/business.xml"),
+    ("Yahoo Finance UK", "https://uk.finance.yahoo.com/rss/"),
+    ("Yahoo Finance S&P 500", "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US"),
+    ("FT Home", "https://www.ft.com/rss/home"),
+    ("FT Markets", "https://www.ft.com/markets?format=rss"),
+    ("Independent Business", "https://www.independent.co.uk/news/business/rss"),
+    ("Fortune", "https://fortune.com/feed/"),
+    ("Seeking Alpha market currents", "https://seekingalpha.com/market_currents.xml"),
+    ("Benzinga", "https://www.benzinga.com/feed"),
+    ("FXStreet", "https://www.fxstreet.com/rss/news"),
+    ("InvestingLive", "https://investinglive.com/feed"),
+    ("OilPrice", "https://oilprice.com/rss/main"),
+    ("Business Insider markets", "https://markets.businessinsider.com/rss/news"),
+    ("CNBC World", "https://www.cnbc.com/id/100727362/device/rss/rss.html"),
+    ("WSJ Markets", "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain"),
+    ("NYT Business", "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"),
+    ("CBS MoneyWatch", "https://www.cbsnews.com/latest/rss/moneywatch"),
+    ("ABC News Business", "https://abcnews.go.com/abcnews/moneyheadlines"),
+    ("SCMP Business", "https://www.scmp.com/rss/92/feed"),
+    ("Google News Reuters", "https://news.google.com/rss/search?q=site:reuters.com+markets+when:1d&hl=en-GB&gl=GB&ceid=GB:en"),
+    ("Google News Bloomberg", "https://news.google.com/rss/search?q=site:bloomberg.com+markets+when:1d&hl=en-GB&gl=GB&ceid=GB:en"),
+    ("Google News currencies", "https://news.google.com/rss/search?q=forex+OR+sterling+OR+euro+OR+yen+when:1d&hl=en-GB&gl=GB&ceid=GB:en"),
+    ("Google News gold/oil/gas", "https://news.google.com/rss/search?q=gold+price+OR+oil+price+OR+natural+gas+when:1d&hl=en-GB&gl=GB&ceid=GB:en"),
+    ("Google News UK economy", "https://news.google.com/rss/search?q=UK+economy+OR+Bank+of+England+OR+FTSE+when:1d&hl=en-GB&gl=GB&ceid=GB:en"),
+    ("Google News Europe", "https://news.google.com/rss/search?q=eurozone+OR+DAX+OR+ECB+when:1d&hl=en-GB&gl=GB&ceid=GB:en"),
+    ("Google News Asia", "https://news.google.com/rss/search?q=Nikkei+OR+yen+OR+China+economy+when:1d&hl=en-GB&gl=GB&ceid=GB:en"),
 )
 
 KEYWORDS = (
@@ -127,11 +156,20 @@ def load_headlines(session: Any, finnhub_key: str | None, now: datetime, lookbac
         jobs.append(("Finnhub", lambda: fetch_finnhub_general(session, finnhub_key)))
     else:
         notes.append("Finnhub: no FINNHUB_API_KEY set, skipped")
-    for name, fn in jobs:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def run(job):
+        name, fn = job
         try:
-            items += fn()
+            return name, fn(), None
         except SourceError as exc:
-            notes.append(f"{name}: unavailable ({exc})")
+            return name, [], f"{name}: unavailable ({exc})"
         except Exception as exc:  # type name only: messages can contain URLs with keys
-            notes.append(f"{name}: unavailable ({type(exc).__name__})")
+            return name, [], f"{name}: unavailable ({type(exc).__name__})"
+
+    with ThreadPoolExecutor(max_workers=8) as pool:      # about 40 feeds: fetch them together, keep the job order in the results
+        for _name, got, note in pool.map(run, jobs):
+            items += got
+            if note:
+                notes.append(note)
     return select_headlines(items, now, lookback_hours, max_items), notes

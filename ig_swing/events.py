@@ -43,6 +43,28 @@ FOMC_DECISION_DATES: tuple[date, ...] = (
     date(2027, 7, 28), date(2027, 9, 15), date(2027, 10, 27), date(2027, 12, 8),
 )
 
+# Central bank decision days for the currencies we trade (added 2026-11-12). Taken on 2026-11-12 from each bank's own schedule page (ECB, Bank
+# of England, Bank of Japan, RBA, Bank of Canada; the SNB's December 2026 date and 2027 list from a search readout of its schedule) and, for the
+# RBNZ, from its own event listings for 9 Dec 2026 to 5 May 2027 plus a calendar site that cites it for the rest (16 Jun to 27 Oct 2027).
+# Only the decision day is kept; announcement times are not (date-only events count for their whole day). Banks can add meetings, and the
+# ECB page showed only its December meeting for 2026. Re-check every year.
+CENTRAL_BANKS: dict[str, tuple[str, tuple[date, ...]]] = {
+    "ECB": ("ECB rate decision (EUR)", (date(2026, 12, 17), date(2027, 2, 4), date(2027, 3, 18), date(2027, 4, 29), date(2027, 6, 10), date(2027, 7, 22),
+                                        date(2027, 9, 9), date(2027, 10, 28), date(2027, 12, 16))),
+    "BoE": ("Bank of England rate decision (GBP)", (date(2026, 12, 17), date(2027, 2, 4), date(2027, 3, 18), date(2027, 4, 29), date(2027, 6, 17),
+                                                   date(2027, 7, 29), date(2027, 9, 16), date(2027, 11, 4), date(2027, 12, 16))),
+    "BoJ": ("Bank of Japan rate decision (JPY)", (date(2026, 12, 18), date(2027, 1, 22), date(2027, 3, 18), date(2027, 4, 28), date(2027, 6, 11),
+                                                 date(2027, 7, 22), date(2027, 9, 22), date(2027, 10, 29), date(2027, 12, 17))),
+    "RBA": ("RBA rate decision (AUD)", (date(2026, 12, 8), date(2027, 2, 9), date(2027, 3, 23), date(2027, 5, 4), date(2027, 6, 22), date(2027, 8, 10),
+                                       date(2027, 9, 28), date(2027, 11, 2), date(2027, 12, 14))),
+    "RBNZ": ("RBNZ rate decision (NZD)", (date(2026, 12, 9), date(2027, 2, 10), date(2027, 3, 17), date(2027, 5, 5), date(2027, 6, 16), date(2027, 8, 4),
+                                         date(2027, 9, 15), date(2027, 10, 27))),
+    "BoC": ("Bank of Canada rate decision (CAD)", (date(2026, 12, 9), date(2027, 1, 27), date(2027, 3, 3), date(2027, 4, 28), date(2027, 6, 2),
+                                                  date(2027, 7, 21), date(2027, 9, 8), date(2027, 10, 27), date(2027, 12, 8))),
+    "SNB": ("SNB rate decision (CHF)", (date(2026, 12, 10), date(2027, 3, 18), date(2027, 6, 24), date(2027, 9, 23), date(2027, 12, 16))),
+}
+CENTRAL_BANK_LAST = date(2027, 10, 27)   # the earliest "last known date" among the banks except the RBNZ's gap: beyond it coverage is partial
+
 # (full-match regex on the normalised release name, label, tier)
 _RULES = [
     (r"employment situation", "Employment Situation (jobs report)", HIGH),
@@ -197,6 +219,15 @@ def fomc_events(start: date, end: date) -> list[Event]:
     return out
 
 
+def central_bank_events(start: date, end: date) -> list[Event]:
+    out = []
+    for _bank, (label, days) in CENTRAL_BANKS.items():
+        for d in days:
+            if start <= d <= end:
+                out.append(Event(d, label, HIGH, "central bank schedule", None))
+    return out
+
+
 # ---- combine ------------------------------------------------------------
 
 
@@ -229,7 +260,7 @@ def events_within(events: list[Event], now_utc: datetime, hours: float, tiers: t
 def load_events(session: Any, start: date, end: date, fred_key: str | None) -> tuple[list[Event], list[str]]:
     """Fetch every source. One failing source never stops the others."""
     notes: list[str] = []
-    lists = [fomc_events(start, end)]
+    lists = [fomc_events(start, end), central_bank_events(start, end)]
     if end > max(FOMC_DECISION_DATES):
         notes.append(f"FOMC: hand-kept dates only run to {max(FOMC_DECISION_DATES)}")
 

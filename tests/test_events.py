@@ -168,3 +168,15 @@ def test_load_events_warns_when_fomc_list_runs_out():
     s = Session([Resp(200, text="")])
     _, notes = load_events(s, date(2028, 1, 1), date(2028, 1, 10), None)
     assert any("hand-kept dates only run to" in n for n in notes)
+
+
+def test_central_bank_decision_days_are_in_the_calendar():
+    from datetime import date
+    from ig_swing import events as ev
+    out = ev.central_bank_events(date(2026, 12, 8), date(2026, 12, 18))
+    labels = {e.label for e in out}
+    assert {"RBA rate decision (AUD)", "RBNZ rate decision (NZD)", "Bank of Canada rate decision (CAD)", "SNB rate decision (CHF)",
+            "ECB rate decision (EUR)", "Bank of England rate decision (GBP)", "Bank of Japan rate decision (JPY)"} <= labels
+    assert all(e.tier == ev.HIGH and e.time_utc is None for e in out)
+    assert [e.day for e in out if e.label.startswith("ECB")] == [date(2026, 12, 17)]
+    assert ev.central_bank_events(date(2026, 11, 1), date(2026, 11, 30)) == []         # nothing in a month with no decision

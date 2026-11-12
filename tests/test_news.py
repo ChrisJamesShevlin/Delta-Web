@@ -130,3 +130,17 @@ def test_publisher_suffix_does_not_defeat_dedupe():
     items = [Headline("Fed holds rates steady - Reuters", now, "Google News"), Headline("Fed holds rates steady - CNBC", now, "Google News"),
              Headline("Fed holds rates steady", now, "CNBC")]
     assert len(select_headlines(items, now)) == 1
+
+
+def test_the_feed_list_is_wide_unique_and_loading_survives_failures():
+    from datetime import datetime, timezone
+    from ig_swing import news
+    names = [n for n, _ in news.RSS_FEEDS]
+    assert len(names) >= 30 and len(set(names)) == len(names) and len({u for _, u in news.RSS_FEEDS}) == len(names)
+    assert not any("reddit" in u for _, u in news.RSS_FEEDS)
+
+    class Boom:
+        def get(self, *a, **k):
+            raise RuntimeError("down")
+    heads, notes = news.load_headlines(Boom(), None, datetime(2026, 11, 12, tzinfo=timezone.utc), 12, 400)
+    assert heads == [] and len(notes) >= len(names)                                    # every failure is reported, none stops the others

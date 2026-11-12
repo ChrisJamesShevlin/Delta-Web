@@ -913,7 +913,7 @@ def main(argv: list[str] | None = None) -> int:
 
             session = requests.Session()
             events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
-            heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 40)
+            heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 400)
             ev_lines = format_events(events)
             print("  Events, next 48 hours:" + ("" if ev_lines else " none found"))
             for line in ev_lines:
@@ -979,7 +979,7 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             notes.append("archive: could not be written")
         events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
-        heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 40)
+        heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 400)
         ev_text = format_events(events)
         clean_heads = drop_promotional(heads)
         hd_text = [f"  {h.published:%H:%M} {h.title}" for h in clean_heads][:10]
