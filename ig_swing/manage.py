@@ -231,21 +231,28 @@ def apply_stop(client: Any, journal: Any, pos: Position, new_stop: float, now: d
     return {"deal_id": pos.deal_id, "from": pos.stop_level, "to": final}
 
 
-def apply_trailing(client: Any, journal: Any, pos: Position, stop: float, distance: float, step: float, now: datetime) -> dict[str, Any]:
+def apply_trailing(client: Any, journal: Any, pos: Position, stop: float, distance: float, step: float, now: datetime, why: str = "") -> dict[str, Any]:
     ref = client.amend_position(position=pos, new_stop=stop if stop != pos.stop_level else None, trailing=(distance, step), user_confirmed=True)
     conf = client.confirm_deal(ref)
     final = conf.stop_level if conf.stop_level is not None else stop
     journal.update_levels(pos.deal_id, stop=final)
-    journal.record_event(now.isoformat(), "trailing_set", json.dumps({"deal_id": pos.deal_id, "stop": final, "distance": distance, "step": step}))
+    journal.record_event(now.isoformat(), "trailing_set", json.dumps({"deal_id": pos.deal_id, "stop": final, "distance": distance, "step": step, "why": why}))
     return {"deal_id": pos.deal_id, "stop": final, "distance": distance, "step": step}
 
 
-def apply_limit(client: Any, journal: Any, pos: Position, new_limit: float, now: datetime) -> dict[str, Any]:
+def apply_limit(client: Any, journal: Any, pos: Position, new_limit: float, now: datetime, why: str = "") -> dict[str, Any]:
     ref = client.amend_position(position=pos, new_limit=new_limit, user_confirmed=True)
     client.confirm_deal(ref)
     journal.update_levels(pos.deal_id, target=new_limit)
-    journal.record_event(now.isoformat(), "limit_set", json.dumps({"deal_id": pos.deal_id, "from": pos.limit_level, "to": new_limit}))
+    journal.record_event(now.isoformat(), "limit_set", json.dumps({"deal_id": pos.deal_id, "from": pos.limit_level, "to": new_limit, "why": why}))
     return {"deal_id": pos.deal_id, "from": pos.limit_level, "to": new_limit}
+
+
+def record_note(journal: Any, now: datetime, market: str, saw: str, decision: str) -> dict[str, str]:
+    """One line per market looked at: what was seen and what was decided (including 'no action'). Journal only, places nothing."""
+    detail = {"market": market, "saw": saw.strip()[:400], "decision": decision.strip()[:200]}
+    journal.record_event(now.isoformat(), "check_note", json.dumps(detail))
+    return detail
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -263,19 +270,26 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--execute", action="store_true")
     s = sub.add_parser("stop")
     s.add_argument("--deal-id", required=True)
+    s.add_argument("--why", default="manual", help="what you saw that justifies the stop move")
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--level", type=float)
     g.add_argument("--breakeven", action="store_true")
     g.add_argument("--distance", type=float, help="points from the current price")
     s.add_argument("--execute", action="store_true")
+    nt = sub.add_parser("note", help="record what you saw and decided for one market, including 'no action' (journal only, places nothing)")
+    nt.add_argument("--market", required=True)
+    nt.add_argument("--saw", required=True)
+    nt.add_argument("--decision", required=True)
     rc = sub.add_parser("reconcile", help="record trades IG closed on its own (stop or take-profit) in the journal; changes the journal only, places nothing")
     rc.add_argument("--execute", action="store_true")
     tr = sub.add_parser("trailing", help="switch a winning position (up 1R or more) to an IG trailing stop")
     tr.add_argument("--deal-id", required=True)
+    tr.add_argument("--why", required=True, help="what you saw that justifies the trailing stop")
     tr.add_argument("--execute", action="store_true")
     lm = sub.add_parser("limit")
     lm.add_argument("--deal-id", required=True)
     lm.add_argument("--level", type=float, required=True)
+    lm.add_argument("--why", required=True, help="what you saw that justifies moving the take-profit")
     lm.add_argument("--execute", action="store_true")
     args = ap.parse_args(argv)
 
@@ -290,6 +304,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "history":
             print(format_history(journal.closed_trades()))
+            return 0
+        if args.cmd == "note":
+            d = record_note(journal, now, args.market, args.saw, args.decision)
+            print(f"NOTE RECORDED: {d['market']}: {d['decision']}")
             return 0
         env = ig_env()
         creds = load_credentials(env)
@@ -361,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
                 new = (pos.bid - args.distance) if pos.direction == "BUY" else (pos.offer + args.distance)
             print(f"{mode}: move the stop on {describe(pos, open_trades.get(pos.deal_id))}\n  from {pos.stop_level} to {new:g}")
             if execute:
-                print("STOP MOVED:", apply_stop(client, journal, pos, new, now, "manual"))
+                print("STOP MOVED:", apply_stop(client, journal, pos, new, now, args.why))
             return 0
         if args.cmd == "trailing":
             pos = _find(positions, args.deal_id)
@@ -375,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{mode}: trailing stop on {describe(pos, tr_)}\n  stop to {stop:g}, trailing distance {distance:g} points, step {step:g} points")
             if execute:
                 try:
-                    print("TRAILING SET:", apply_trailing(client, journal, pos, stop, distance, step, now))
+                    print("TRAILING SET:", apply_trailing(client, journal, pos, stop, distance, step, now, args.why))
                 except (IGError, OrderRejected) as exc:
                     print(f"NOT SET: {exc}\n" + MANUAL_TRAILING.format(distance=distance, step=step))
                     return 1
@@ -386,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
             pos = _find(positions, args.deal_id)
             print(f"{mode}: set the take-profit on {describe(pos, open_trades.get(pos.deal_id))}\n  from {pos.limit_level} to {args.level:g}")
             if execute:
-                print("TAKE-PROFIT SET:", apply_limit(client, journal, pos, args.level, now))
+                print("TAKE-PROFIT SET:", apply_limit(client, journal, pos, args.level, now, args.why))
             return 0
         if args.cmd == "trail":
             done = 0

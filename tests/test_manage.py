@@ -328,3 +328,15 @@ def test_transactions_are_normalised_by_the_client(tmp_path):
     got = c.get_transactions(date(2026, 11, 12))
     assert got == [{"instrument": "EUR/USD", "open_level": 11000.5, "close_level": 10900.0, "size": 0.01, "pnl_text": "£-1.00", "closed_utc": "2026-11-12T14:00:00",
                     "opened_utc": "2026-11-12T09:00:20", "reference": "X", "type": "DEAL"}]
+
+
+def test_limit_and_trailing_events_keep_the_why_and_notes_are_journalled(tmp_path):
+    import json
+    j = Journal(tmp_path / "j.db")
+    open_trade(j)
+    mg.apply_limit(FakeClient(), j, pos(), 11300.0, NOW, "momentum intact, calendar clear")
+    mg.apply_trailing(TrailClient(), j, pos(bid=11100.0), 11000.0, 100.0, 20.0, NOW, "up 1R")
+    mg.record_note(j, NOW, "Gold", "flat, spread 3x normal", "no action")
+    ev = {e["kind"]: json.loads(e["detail"]) for e in j.events()}
+    assert ev["limit_set"]["why"] == "momentum intact, calendar clear" and ev["trailing_set"]["why"] == "up 1R"
+    assert ev["check_note"] == {"market": "Gold", "saw": "flat, spread 3x normal", "decision": "no action"}

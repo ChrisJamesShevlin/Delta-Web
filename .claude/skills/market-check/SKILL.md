@@ -73,6 +73,8 @@ Opening is one half of this authorisation; managing open positions (step 0) is t
 ## 5. Report
 Say what you saw, what you recorded, what (if anything) is proposed live, and what you do not know. Mention `python3 -m ig_swing.challenge report` for the scored shadow book and the probability check. Keep it short.
 
+**Journal it too.** `manage limit` and `manage trailing` now require `--why`, and `manage stop` takes `--why`; use the same words as in the chat. At the end of every check run `python3 -m ig_swing.manage note --market "<market>" --saw "<what you saw>" --decision "<what you did, or no action>"` for each market you seriously looked at, including the ones you left alone. It is journal only and places nothing.
+
 **Whenever you place, close, reverse or change anything (a new order, a close, a stop or take-profit move, a trailing stop), tell the user in the chat straight away, in plain text, no artifact and no tables: what you did (market, direction, stake, stop, target, or the old and new level), and why in two to four sentences: what you saw that formed the decision (the move, the news or event, the level, IG sentiment, the spread), how sure you are (your stated win chance) and what would prove you wrong. For a close or a stop move, say what changed since entry. If you looked at something and did nothing, one line on why not.**
 
 ## 6. The learning loop (keep the data clean, do not tune on noise)
