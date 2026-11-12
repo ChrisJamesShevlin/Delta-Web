@@ -36,4 +36,11 @@ def test_commit_without_a_remote_stays_local(tmp_path, monkeypatch):
     Journal(tmp_path / "a.db")
     backup.export_journal(tmp_path / "a.db", tmp_path / "out")
     assert backup.commit(tmp_path / "out") == "committed locally"
-    assert backup.commit(tmp_path / "out", push=True) == "no changes since the last backup"
+    assert backup.commit(tmp_path / "out") == "no changes since the last backup"
+    assert "no remote" in backup.commit(tmp_path / "out", push=True)
+
+
+def test_auth_env_is_empty_without_a_source_repo_and_redaction_hides_the_header(tmp_path, monkeypatch):
+    monkeypatch.setenv("IG_BACKUP_AUTH_FROM", str(tmp_path / "nowhere"))
+    assert backup._auth_env() == {}
+    assert "SECRETVALUE" not in backup._redact("http.extraheader=AUTHORIZATION: basic SECRETVALUE")

@@ -69,8 +69,32 @@ def restore_journal(src: str | Path, db: str | Path) -> dict[str, int]:
     return counts
 
 
-def _git(dir_: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(dir_), *args], capture_output=True, text=True)
+HEADER_KEY = "http.https://github.com/.extraheader"
+
+
+def _auth_env() -> dict[str, str]:
+    """Environment for a push when the shell has no GitHub login: borrow the extraheader another local repo already
+    holds (default the sibling Snooker repo, or $IG_BACKUP_AUTH_FROM). The value is only passed to git through the
+    environment, never printed, logged or written to a file."""
+    src = os.environ.get("IG_BACKUP_AUTH_FROM")
+    src_dir = Path(src) if src else Path(__file__).resolve().parent.parent.parent / "Snooker"
+    if not (src_dir / ".git").exists():
+        return {}
+    r = subprocess.run(["git", "-C", str(src_dir), "config", "--get", HEADER_KEY], capture_output=True, text=True)
+    value = r.stdout.strip()
+    if r.returncode != 0 or not value:
+        return {}
+    return {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": HEADER_KEY, "GIT_CONFIG_VALUE_0": value}
+
+
+def _redact(text: str) -> str:
+    import re
+    return re.sub(r"(?i)(authorization: *\w+ )\S+", r"\1***", text)
+
+
+def _git(dir_: Path, *args: str, auth: bool = False) -> subprocess.CompletedProcess:
+    env = {**os.environ, **_auth_env()} if auth else None
+    return subprocess.run(["git", "-C", str(dir_), *args], capture_output=True, text=True, env=env)
 
 
 def commit(dir_: Path, push: bool = False) -> str:
@@ -78,15 +102,19 @@ def commit(dir_: Path, push: bool = False) -> str:
         _git(dir_, "init", "-b", "main")
     _git(dir_, "add", "-A")
     if not _git(dir_, "status", "--porcelain").stdout.strip():
-        return "no changes since the last backup"
-    r = _git(dir_, "commit", "-m", "journal backup")
-    if r.returncode != 0:
-        return "commit failed: " + (r.stderr or r.stdout).strip()[:200]
+        if not push:
+            return "no changes since the last backup"
+        committed = False  # still try the push: an earlier push may have failed after its commit
+    else:
+        r = _git(dir_, "commit", "-m", "journal backup")
+        if r.returncode != 0:
+            return "commit failed: " + (r.stderr or r.stdout).strip()[:200]
+        committed = True
     if push:
         if not _git(dir_, "remote").stdout.strip():
             return "committed locally; no remote set (create a PRIVATE repo and add it as origin)"
-        p = _git(dir_, "push", "origin", f"HEAD:{BRANCH}")
-        return "committed and pushed" if p.returncode == 0 else "committed; push failed: " + p.stderr.strip()[:200]
+        p = _git(dir_, "push", "origin", f"HEAD:refs/heads/{BRANCH}", auth=True)
+        return ("committed and pushed" if committed else "pushed (no new changes)") if p.returncode == 0 else "committed; push failed: " + _redact(p.stderr.strip())[:200]
     return "committed locally"
 
 
