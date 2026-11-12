@@ -8,7 +8,7 @@ repo, and it never contains credentials (the journal holds none).
     python3 -m ig_swing.backup export [--dir DIR] [--commit] [--push]
     python3 -m ig_swing.backup restore [--dir DIR] [--db data/journal.db]
 
-Default DIR is $IG_BACKUP_DIR, else ../IG-Swing-backup next to this repo. Restore refuses to touch a journal that
+Pushes go to the branch journal-backup of origin, never main. Default DIR is $IG_BACKUP_DIR, else ../IG-Swing-backup next to this repo. Restore refuses to touch a journal that
 already has rows. Rebuildable caches (data/history, data/cache) are deliberately not backed up.
 """
 
@@ -23,6 +23,7 @@ from pathlib import Path
 
 from .journal import Journal
 
+BRANCH = "journal-backup"  # pushed to this branch only, never to main
 TABLES = ("trades", "decisions", "events", "equity_daily", "snapshots", "baseline_ideas")
 
 
@@ -84,7 +85,7 @@ def commit(dir_: Path, push: bool = False) -> str:
     if push:
         if not _git(dir_, "remote").stdout.strip():
             return "committed locally; no remote set (create a PRIVATE repo and add it as origin)"
-        p = _git(dir_, "push", "origin", "HEAD")
+        p = _git(dir_, "push", "origin", f"HEAD:{BRANCH}")
         return "committed and pushed" if p.returncode == 0 else "committed; push failed: " + p.stderr.strip()[:200]
     return "committed locally"
 
