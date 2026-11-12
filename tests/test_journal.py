@@ -84,3 +84,32 @@ def test_data_survives_reopening_the_database(tmp_path):
     j = journal(tmp_path)
     open_long(j)
     assert len(Journal(tmp_path / "j.db").open_trades()) == 1
+
+
+def test_a_partial_close_banks_profit_keeps_the_original_risk_and_the_final_close_adds_up(tmp_path):
+    j = Journal(tmp_path / "j.db")
+    tid = j.open_trade(opened_at="2026-11-12T10:00:00+00:00", epic="E", direction="SELL", size=0.07, entry=6833.4, stop=6903.4, risk_gbp=4.9)
+    row = j.partial_close(tid, 0.06, 6827.8)                             # 0.06 closed 5.6 points in profit
+    assert row["size"] == 0.01 and row["initial_size"] == 0.07 and round(row["realised_partial"], 4) == 0.336
+    closed = j.close_trade(tid, "2026-11-13T10:00:00+00:00", 6813.4, "target")      # the last 0.01 closes 20 points in profit
+    assert round(closed["gross_pnl"], 4) == round(0.336 + 0.01 * 20.0, 4) and round(closed["r_multiple"], 4) == round(0.536 / 4.9, 4)
+
+
+def test_a_partial_close_must_be_smaller_than_the_open_size_and_the_schema_migrates(tmp_path):
+    import sqlite3
+    import pytest
+    j = Journal(tmp_path / "j.db")
+    tid = j.open_trade(opened_at="2026-11-12T10:00:00+00:00", epic="E", direction="BUY", size=0.02, entry=100.0, stop=90.0, risk_gbp=1.0)
+    with pytest.raises(ValueError):
+        j.partial_close(tid, 0.02, 101.0)
+    old = tmp_path / "old.db"
+    c = sqlite3.connect(old)
+    c.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT, opened_at TEXT NOT NULL, closed_at TEXT, market TEXT, epic TEXT NOT NULL, "
+              "expiry TEXT, direction TEXT NOT NULL, size REAL NOT NULL, entry REAL NOT NULL, stop REAL NOT NULL, target REAL, risk_gbp REAL, setup TEXT, "
+              "driver TEXT, thesis TEXT, invalidation TEXT, deal_ref TEXT, deal_id TEXT, exit REAL, exit_reason TEXT, gross_pnl REAL, spread_cost REAL, "
+              "financing REAL, net_pnl REAL, r_multiple REAL, notes TEXT)")
+    c.commit()
+    c.close()
+    Journal(old)
+    cols = {r[1] for r in sqlite3.connect(old).execute("PRAGMA table_info(trades)")}
+    assert {"realised_partial", "initial_size"} <= cols

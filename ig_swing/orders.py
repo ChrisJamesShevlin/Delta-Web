@@ -168,4 +168,6 @@ class OrderService:
             self.journal.close_trade(trade["id"], ts, conf.level, reason)
         else:
             self.journal.record_event(ts, "partial_close", f"{position.deal_id}: closed {close_size} ({reason})")
+            if trade is not None and conf.level is not None and 0 < close_size < trade["size"]:
+                self.journal.partial_close(trade["id"], close_size, conf.level)
         return OrderResult(True, "closed" if close_size >= position.size else "partly closed", deal_id=position.deal_id, size=close_size)

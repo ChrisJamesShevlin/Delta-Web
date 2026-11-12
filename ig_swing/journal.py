@@ -64,6 +64,11 @@ class Journal:
             cols = {r["name"] for r in c.execute("PRAGMA table_info(snapshots)")}
             if "tech" not in cols:  # added 2026-11-12: the technical read archived as JSON
                 c.execute("ALTER TABLE snapshots ADD COLUMN tech TEXT")
+            tcols = {r["name"] for r in c.execute("PRAGMA table_info(trades)")}
+            if "realised_partial" not in tcols:  # added 2026-11-12: profit banked by partial closes, and the size the trade opened with
+                c.execute("ALTER TABLE trades ADD COLUMN realised_partial REAL DEFAULT 0")
+            if "initial_size" not in tcols:
+                c.execute("ALTER TABLE trades ADD COLUMN initial_size REAL")
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
@@ -98,6 +103,23 @@ class Journal:
             )
             return int(cur.lastrowid)
 
+    def partial_close(self, trade_id: int, closed_size: float, exit_price: float) -> dict[str, Any]:
+        """Part of an open trade was closed: bank that part's gross profit, reduce the remaining size, keep the original risk (so R stays
+        measured against what was risked at entry) and remember the size it opened with."""
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"no trade {trade_id}")
+            if row["closed_at"] is not None:
+                raise ValueError(f"trade {trade_id} is already closed")
+            if not (0 < closed_size < row["size"]):
+                raise ValueError("a partial close must be smaller than the open size")
+            move = exit_price - row["entry"] if row["direction"] == "BUY" else row["entry"] - exit_price
+            banked = (row["realised_partial"] or 0.0) + closed_size * move
+            c.execute("UPDATE trades SET size=?, realised_partial=?, initial_size=COALESCE(initial_size, ?) WHERE id=?",
+                      (round(row["size"] - closed_size, 10), banked, row["size"], trade_id))
+            return dict(c.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone())
+
     def close_trade(self, trade_id: int, closed_at: str, exit_price: float, exit_reason: str,
                     financing: float = 0.0, spread_cost: float | None = None, notes: str | None = None) -> dict[str, Any]:
         with self._conn() as c:
@@ -107,7 +129,7 @@ class Journal:
             if row["closed_at"] is not None:
                 raise ValueError(f"trade {trade_id} is already closed")
             move = exit_price - row["entry"] if row["direction"] == "BUY" else row["entry"] - exit_price
-            gross = row["size"] * move
+            gross = row["size"] * move + (row["realised_partial"] or 0.0)     # the rest of the trade plus anything banked by partial closes
             net = gross - financing
             r = net / row["risk_gbp"] if row["risk_gbp"] else None
             c.execute(

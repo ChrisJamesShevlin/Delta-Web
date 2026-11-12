@@ -144,9 +144,11 @@ def test_partial_close_is_an_event_and_the_trade_stays_open(tmp_path):
     c = FakeClient(confirmation=conf(level=7650.0))
     s, j, _ = service(tmp_path, c)
     s.submit_entry(**ENTRY)
-    r = s.submit_close(position("D1", size=0.04), "halve before CPI", NOW, size=0.02)
+    r = s.submit_close(position("D1", size=0.01), "halve before CPI", NOW, size=0.004)
     assert r.status == "partly closed" and len(j.open_trades()) == 1
-    assert j.events()[-1]["kind"] == "partial_close"
+    assert "partial_close" in [e["kind"] for e in j.events()]
+    t = j.open_trades()[0]
+    assert t["initial_size"] is not None and t["size"] < t["initial_size"] and abs(t["size"] - 0.006) < 1e-9   # the open size was reduced (the P&L arithmetic is tested in test_journal)
 
 
 def test_declined_close_does_nothing(tmp_path):
