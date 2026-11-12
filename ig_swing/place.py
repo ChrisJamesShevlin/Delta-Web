@@ -25,7 +25,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from .challenge import ALL_MARKETS, KELLY_FRACTION, PLAYBOOKS, calibration, kelly_fraction, load_ideas, looks_like_epic, measure, resolve_market, suggested_risk_pct
+from .challenge import ALL_MARKETS, KELLY_FRACTION, PLAYBOOKS, calibration, kelly_fraction, load_ideas, looks_like_epic, measure, resolve_market, scored_ideas, suggested_risk_pct
 from .context import ContextVerdict
 from .orders import OrderService
 from .risk import AccountState, EntryProposal, RiskEngine
@@ -145,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         journal = Journal()
         engine = RiskEngine(risk_limits(env), KillSwitch())
         account = build_account(client, journal, creds.account_id, now)
-        ideas = load_ideas(journal.events())
+        ideas = scored_ideas(journal.events())
         calibrated = False
         if len(ideas) >= 30:
             calibrated = calibration(measure(ideas, lambda key: clean_daily(client.get_prices(key if looks_like_epic(key) else ALL_MARKETS[key][0], "DAY", 60), now))["finished"])["calibrated"]

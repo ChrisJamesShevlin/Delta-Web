@@ -451,3 +451,11 @@ def test_rule_changelog_date_and_the_review_text():
 def test_the_changelog_file_exists_and_is_parseable():
     text = open("RULE_CHANGELOG.md").read()
     assert ch.last_rule_change(text) == "2026-11-12" and text.count("\n- 20") >= 5
+
+
+def test_excluded_ideas_stay_in_the_record_but_leave_the_results():
+    import json
+    ev = [{"kind": ch.KIND, "detail": json.dumps({"id": i})} for i in (1, 2, 3)]
+    ev.append({"kind": ch.EXCLUDED_KIND, "detail": json.dumps({"idea_id": 2, "reason": "no view"})})
+    assert [i["id"] for i in ch.load_ideas(ev)] == [1, 2, 3]
+    assert [i["id"] for i in ch.scored_ideas(ev)] == [1, 3]

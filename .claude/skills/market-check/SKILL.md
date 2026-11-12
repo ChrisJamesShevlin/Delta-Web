@@ -46,7 +46,7 @@ Record how deep you went with `--research none|headlines|web` and the sources yo
 - Is there a cause in the headlines or the calendar (CPI, jobs, FOMC, geopolitics)? Say if you cannot find one.
 - Where is price against its 20-day range (breakdown, breakout, middle)? What are IG clients doing (extreme positioning is only a hypothesis, never a rule)?
 - Open positions, the £15 floor, the cooldown after two losses, and the drawdown brake. Read the equity line.
-- For a sudden drop, the honest answer is often "no trade". Fading and following a spike both lack a validated edge: if it is unclear, record BOTH as shadow ideas and take neither live.
+- For a sudden drop, the honest answer is often "no trade". Fading and following a spike both lack a validated edge: if you cannot pick a side with a stated reason, record NO idea (never both directions: one always loses and the record then looks like a coin flip), and leave a `manage note` saying why. Only record an idea you would back. If an idea was recorded without a real view, tag it with `python3 -m ig_swing.challenge exclude --idea-id N --reason "..."` so it stays out of the results.
 
 ## 3. Write the ideas (zero to three)
 For every idea you would seriously consider, record it with `python3 -m ig_swing.challenge idea --market ... --direction ... --stop <points> --target <points> --p-win <0.05 to 0.95> --playbook <event_reaction|news_thesis|earnings|trend|sentiment|other> --confidence <LOW|MEDIUM|HIGH> --thesis "<at most 300 characters>"`.

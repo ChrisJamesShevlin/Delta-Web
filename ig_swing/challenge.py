@@ -168,6 +168,22 @@ def load_ideas(events: list[dict]) -> list[dict]:
     return out
 
 
+EXCLUDED_KIND = "idea_excluded"
+
+
+def scored_ideas(events: list[dict]) -> list[dict]:
+    """Ideas that count in results: every recorded idea except those later tagged no-view (the record itself is never edited, and ids still
+    follow the count of all ideas)."""
+    out_ids = set()
+    for e in events:
+        if e["kind"] == EXCLUDED_KIND:
+            try:
+                out_ids.add(json.loads(e["detail"])["idea_id"])
+            except (ValueError, TypeError, KeyError):
+                continue
+    return [i for i in load_ideas(events) if i.get("id") not in out_ids]
+
+
 def score_idea(idea: dict, bars: pd.DataFrame) -> dict[str, Any] | None:
     """The outcome in points and R once the idea has run its course, else None. Bars must be complete daily bars."""
     start = pd.Timestamp(idea["ts"]).tz_convert("UTC").tz_localize(None).normalize()
@@ -723,6 +739,9 @@ def main(argv: list[str] | None = None) -> int:
     q = sub.add_parser("quick", help="a fast read on one market, for a sudden move")
     q.add_argument("--market", required=True, help="any IG market: a name from the briefing, an epic, or search words")
     sub.add_parser("report")
+    ex = sub.add_parser("exclude", help="tag an earlier idea as no-view so it stays out of the results (the record is kept, never edited)")
+    ex.add_argument("--idea-id", type=int, required=True)
+    ex.add_argument("--reason", required=True)
     sub.add_parser("review", help="everything the data says so far, with the baseline, calibration and how much to trust it")
     f = sub.add_parser("find", help="look up any market on IG and see whether it fits the account")
     f.add_argument("--term", required=True)
@@ -749,6 +768,14 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(UTC)
     journal = Journal()
     try:
+        if args.cmd == "exclude":
+            ids = {i.get("id") for i in load_ideas(journal.events())}
+            if args.idea_id not in ids:
+                print(f"no idea with id {args.idea_id}")
+                return 1
+            journal.record_event(now.isoformat(), EXCLUDED_KIND, json.dumps({"idea_id": args.idea_id, "reason": args.reason}))
+            print(f"idea {args.idea_id} tagged no-view and left out of results: {args.reason}")
+            return 0
         env = ig_env()
         creds = load_credentials(env)
         from .ig_client import PriceCache
@@ -855,7 +882,7 @@ def main(argv: list[str] | None = None) -> int:
                     memo[epic_] = clean_daily(client.get_prices(epic_, "DAY", 40), now)
                 return memo[epic_]
 
-            m = measure(load_ideas(journal.events()), get_bars)
+            m = measure(scored_ideas(journal.events()), get_bars)
             bl = journal.baselines()
             bf = measure_baseline(bl, get_bars)
             rows_, days_ = journal.snapshot_counts()
@@ -865,7 +892,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "report":
             get_bars = lambda key: clean_daily(client.get_prices(key if looks_like_epic(key) else ALL_MARKETS[key][0], "DAY", 60), now)
-            print(format_report(measure(load_ideas(journal.events()), get_bars)))
+            print(format_report(measure(scored_ideas(journal.events()), get_bars)))
             return 0
         import requests
 
