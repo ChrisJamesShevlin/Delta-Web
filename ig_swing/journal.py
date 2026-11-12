@@ -61,6 +61,9 @@ class Journal:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA)
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(snapshots)")}
+            if "tech" not in cols:  # added 2026-11-12: the technical read archived as JSON
+                c.execute("ALTER TABLE snapshots ADD COLUMN tech TEXT")
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
@@ -135,10 +138,11 @@ class Journal:
         day = ts[:10]
         with self._conn() as c:
             for r in rows:
-                c.execute("INSERT INTO snapshots (ts, day, market, epic, price, bid, offer, spread_pct, day_pct, atr, atr_pct, range_pos, long_pct, sma20) "
-                          "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                c.execute("INSERT INTO snapshots (ts, day, market, epic, price, bid, offer, spread_pct, day_pct, atr, atr_pct, range_pos, long_pct, sma20, tech) "
+                          "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                           (ts, day, r["market"], r["epic"], r.get("price"), r.get("bid"), r.get("offer"), r.get("spread_pct"), r.get("day_pct"), r.get("atr"),
-                           r.get("atr_pct"), r.get("range_pos"), r.get("long_pct"), r.get("sma20")))
+                           r.get("atr_pct"), r.get("range_pos"), r.get("long_pct"), r.get("sma20"),
+                           json.dumps(r["tech"]) if r.get("tech") else None))
         return len(rows)
 
     def snapshot_counts(self) -> tuple[int, int]:

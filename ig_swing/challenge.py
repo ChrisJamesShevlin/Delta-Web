@@ -28,6 +28,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from .techread import format_tech, tech_read
+
 UTC = timezone.utc
 KIND = "challenge_idea"
 
@@ -480,6 +482,11 @@ def format_briefing(now: datetime, rows: list[dict], equity: float, positions: i
             atrp_txt = "n/a" if r["atr_pct"] is None else f"{r['atr_pct']:.2f}"
             lines.append(f"{r['market']:16} {r['price']:>9.1f} {r['day_pct']:>+6.2f}% {atr_txt:>8} {atrp_txt:>5}% {pos:>9} {sent:>11} {r['spread_pct']:>6.3f}%  {stake}")
         lines.append("")
+    tech_rows = [r for r in rows if r.get("tech")]
+    if tech_rows:
+        lines += ["Technical read (20-day trend, RSI, distance to the 20-day extremes, prior day and last 5 days; context only, no edge shown):"]
+        lines += [f"  {r['market']}: {format_tech(r['tech'])}" for r in tech_rows]
+        lines.append("")
     fits = [r["market"] for r in rows if r["stake"]]
     shadow = [r["market"] for r in rows if not r["stake"]]
     lines.append(f"Fits the live account at 10% risk ({len(fits)}): " + (", ".join(fits) or "none"))
@@ -712,7 +719,7 @@ def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.Da
                 continue
             price = (snap.bid + snap.offer) / 2
             margin = snap.margin or margin
-            sma20 = None
+            sma20, tech = None, None
             if name in SHARES:
                 a, atr_pct, range_pos = None, None, None
                 stake, note = stake_hint(equity, 10.0, 0.03 * price, price, margin, snap.min_stake)
@@ -724,9 +731,10 @@ def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.Da
                 stake, note = stake_hint(equity, 10.0, 1.5 * a, price, margin, snap.min_stake)
                 atr_pct, range_pos = a / price * 100, ((price - lo) / (hi - lo) if hi > lo else None)
                 sma20 = float(bars["close"].tail(20).mean())
+                tech = tech_read(bars, price)
             rows.append({"market": name, "epic": epic, "bid": snap.bid, "offer": snap.offer, "sma20": sma20, "price": price, "day_pct": snap.pct_change or 0.0, "atr": a, "atr_pct": atr_pct,
                          "range_pos": range_pos, "long_pct": None, "stake": stake, "note": note,
-                         "spread_pct": (snap.offer - snap.bid) / price * 100, "sent_id": sent_id or snap.sent_id or ""})
+                         "spread_pct": (snap.offer - snap.bid) / price * 100, "sent_id": sent_id or snap.sent_id or "", "tech": tech})
         except Exception as exc:  # type name only
             notes.append(f"{name}: unavailable ({type(exc).__name__})")
     return rows, notes
@@ -801,10 +809,11 @@ def main(argv: list[str] | None = None) -> int:
             direction = args.direction.upper()
             entry = info["offer"] if direction == "BUY" else info["bid"]
             n = len(load_ideas(journal.events())) + 1
-            atr_pts, range_pos = None, None
+            atr_pts, range_pos, tech_ = None, None, None
             try:
                 from .indicators import atr as atr_fn
                 bars_ = clean_daily(client.get_prices(info["epic"], "DAY", 30), now)
+                tech_ = tech_read(bars_, (info["bid"] + info["offer"]) / 2)
                 atr_pts = float(atr_fn(bars_, 14).iloc[-1])
                 lo_, hi_ = float(bars_["low"].tail(20).min()), float(bars_["high"].tail(20).max())
                 range_pos = ((info["bid"] + info["offer"]) / 2 - lo_) / (hi_ - lo_) if hi_ > lo_ else None
@@ -820,6 +829,7 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 evs_ = []
             features = idea_features(info, atr_pts, range_pos, long_pct, evs_, now)
+            features["tech"] = tech_
             idea = make_idea(n, now, info["name"], direction, entry, info["offer"] - info["bid"], args.stop, args.target, args.p_win, args.playbook,
                              args.confidence, args.thesis, args.horizon, args.live, args.research, args.source, info["epic"], features)
             journal.record_event(now.isoformat(), KIND, json.dumps(idea))
@@ -845,6 +855,7 @@ def main(argv: list[str] | None = None) -> int:
             print(fit_line(info, equity))
             print(format_quick(info["name"], quick_info, float(atr(bars, 14).iloc[-1]), hourly, long_pct,
                                (float(bars["low"].tail(20).min()), float(bars["high"].tail(20).max())), len(client.get_positions())))
+            print("  Technical read: " + format_tech(tech_read(bars, quick_info["price"])))
             import requests
 
             from .config import optional_key
