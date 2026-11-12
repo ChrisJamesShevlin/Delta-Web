@@ -15,3 +15,4 @@
 {"detail": "{\"idea_id\": 4, \"deal_id\": \"DIAAAASGWW93VBB\"}", "id": 15, "kind": "challenge_live", "ts": "2026-11-12T08:59:39.083650+00:00"}
 {"detail": "{\"deal_id\": \"DIAAAASGWW93VBB\", \"r\": -0.043}", "id": 16, "kind": "position_check", "ts": "2026-11-12T08:59:51.895048+00:00"}
 {"detail": "{\"market\": \"NVIDIA\", \"saw\": \"placed SELL at about 16169, stop 490, target 980, min stake; 65% of equity as margin\", \"decision\": \"live low-conviction data trade (idea 4)\"}", "id": 17, "kind": "check_note", "ts": "2026-11-12T08:59:52.445413+00:00"}
+{"detail": "{\"market\": \"NVIDIA\", \"saw\": \"position gone from IG, closed at 16130 (entry 16180, +50 points, about +\\u00a30.50), not at stop or target; closed outside a session, presumably by the user in the platform\", \"decision\": \"recorded by reconcile; no action\"}", "id": 18, "kind": "check_note", "ts": "2026-11-12T09:04:14.375469+00:00"}
