@@ -37,7 +37,38 @@ def tech_read(bars: pd.DataFrame, price: float) -> dict[str, Any] | None:
 def format_tech(t: dict[str, Any] | None) -> str:
     if not t:
         return "technical read: not enough bars"
+    if "trend" not in t:
+        return "20-day detail not available" + format_long(t)
     def d(x):  # distance in ATRs, negative means beyond the extreme
         return "n/a" if x is None else f"{x:+.1f} ATR"
     return (f"{t['trend']} ({t['slope_pct']:+.2f}% in 5 days), RSI {t['rsi']:.0f}, {d(t['to_hi20_atr'])} below the 20-day high, {d(t['to_lo20_atr'])} above the 20-day low (a minus sign means beyond it), "
-            f"prior day {t['prev_low']:.1f} to {t['prev_high']:.1f}, last 5 days {t['week_low']:.1f} to {t['week_high']:.1f}")
+            f"prior day {t['prev_low']:.1f} to {t['prev_high']:.1f}, last 5 days {t['week_low']:.1f} to {t['week_high']:.1f}" + format_long(t))
+
+
+def long_read(bars: pd.DataFrame) -> dict[str, Any] | None:
+    """Distance of the latest close from the 50 and 200 day averages, in percent, from a longer series. None if under 60 bars (the 200 day
+    figure is None under 200 bars)."""
+    if bars is None or len(bars) < 60:
+        return None
+    close = bars["close"].astype(float)
+    last = float(close.iloc[-1])
+    sma50 = float(close.tail(50).mean())
+    sma200 = float(close.tail(200).mean()) if len(close) >= 200 else None
+    d50 = (last / sma50 - 1) * 100
+    d200 = (last / sma200 - 1) * 100 if sma200 else None
+    if d200 is None:
+        label = "above the 50-day" if d50 > 0 else "below the 50-day"
+    elif d50 > 0 and d200 > 0:
+        label = "above the 50 and 200 day averages" + (" (50 over 200)" if sma50 > sma200 else " (50 still under 200)")
+    elif d50 < 0 and d200 < 0:
+        label = "below the 50 and 200 day averages" + (" (50 under 200)" if sma50 < sma200 else " (50 still over 200)")
+    else:
+        label = "above the 50-day, below the 200-day" if d50 > 0 else "below the 50-day, above the 200-day"
+    return {"long_trend": label, "d50_pct": d50, "d200_pct": d200}
+
+
+def format_long(t: dict[str, Any] | None) -> str:
+    if not t or "long_trend" not in t:
+        return ""
+    d200 = "n/a" if t.get("d200_pct") is None else f"{t['d200_pct']:+.1f}%"
+    return f"; longer view (Yahoo, approximate): {t['long_trend']}, {t['d50_pct']:+.1f}% from the 50-day, {d200} from the 200-day"

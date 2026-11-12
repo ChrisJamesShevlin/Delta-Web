@@ -28,7 +28,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from .techread import format_tech, tech_read
+from .techread import format_tech, long_read, tech_read
 
 UTC = timezone.utc
 KIND = "challenge_idea"
@@ -702,6 +702,43 @@ def fit_line(info: dict[str, Any], equity: float, max_margin_share: float = 1.0)
                                                                   if fits else f"does NOT fit £{equity:.2f} (the margin is more than the account holds): shadow book only"))
 
 
+def enrich_with_yahoo(session: Any, rows: list[dict], today: Any) -> int:
+    """Add the 50 and 200 day view from Yahoo to each row's technical read, and give the shares (which have no IG bars) a full read too.
+    Context only: rows already carry IG's own ATR, which is left alone. Any failure for a market just leaves it without the longer view."""
+    from .yahoo_bars import load_daily, scale_to, symbol_for
+
+    n = 0
+    for r in rows:
+        sym = symbol_for(r["market"], r["epic"], ticker_for(r["market"], r["epic"]))
+        if not sym:
+            continue
+        yb = load_daily(session, sym, today)
+        if yb is None:
+            continue
+        lr = long_read(yb)
+        if r.get("tech") is None:                      # a share: build the whole read from Yahoo bars rescaled to IG's price
+            scaled = scale_to(yb, r["price"])
+            r["tech"] = tech_read(scaled, r["price"]) if scaled is not None else None
+        if r.get("tech") is not None and lr:
+            r["tech"].update(lr)
+            n += 1
+        elif lr:
+            r["tech"] = dict(lr)
+            n += 1
+    return n
+
+
+def tech_for_market(session: Any, info: dict[str, Any], price: float, ig_bars: pd.DataFrame | None, today: Any) -> dict[str, Any] | None:
+    """The technical read for one named market: IG's own bars first, then the longer Yahoo view merged in (and a full read for a share)."""
+    key = {v[0]: k for k, v in ALL_MARKETS.items()}.get(info["epic"], info["name"])
+    row = {"market": key, "epic": info["epic"], "price": price, "tech": tech_read(ig_bars, price) if ig_bars is not None else None}
+    try:
+        enrich_with_yahoo(session, [row], today)
+    except Exception:
+        pass
+    return row["tech"]
+
+
 def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.DataFrame, datetime], pd.DataFrame],
                markets: dict[str, tuple[str, str, float]] | None = None) -> tuple[list[dict], list[str]]:
     from .indicators import atr
@@ -813,12 +850,19 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 from .indicators import atr as atr_fn
                 bars_ = clean_daily(client.get_prices(info["epic"], "DAY", 30), now)
-                tech_ = tech_read(bars_, (info["bid"] + info["offer"]) / 2)
+                import requests as _rq
+                tech_ = tech_for_market(_rq.Session(), info, (info["bid"] + info["offer"]) / 2, bars_, now.date())
                 atr_pts = float(atr_fn(bars_, 14).iloc[-1])
                 lo_, hi_ = float(bars_["low"].tail(20).min()), float(bars_["high"].tail(20).max())
                 range_pos = ((info["bid"] + info["offer"]) / 2 - lo_) / (hi_ - lo_) if hi_ > lo_ else None
             except Exception:
                 pass
+            if tech_ is None:
+                try:
+                    import requests as _rq2
+                    tech_ = tech_for_market(_rq2.Session(), info, (info["bid"] + info["offer"]) / 2, None, now.date())
+                except Exception:
+                    tech_ = None
             long_pct = batch_sentiment(client, [info["sent_id"]]).get(info["sent_id"]) if info["sent_id"] else None
             try:
                 import requests
@@ -855,8 +899,9 @@ def main(argv: list[str] | None = None) -> int:
             print(fit_line(info, equity))
             print(format_quick(info["name"], quick_info, float(atr(bars, 14).iloc[-1]), hourly, long_pct,
                                (float(bars["low"].tail(20).min()), float(bars["high"].tail(20).max())), len(client.get_positions())))
-            print("  Technical read: " + format_tech(tech_read(bars, quick_info["price"])))
             import requests
+
+            print("  Technical read: " + format_tech(tech_for_market(requests.Session(), info, quick_info["price"], bars, now.date())))
 
             from .config import optional_key
             from .events import load_events
@@ -917,6 +962,12 @@ def main(argv: list[str] | None = None) -> int:
         sentiment = batch_sentiment(client, [r["sent_id"] for r in rows if r["sent_id"]])
         for r in rows:
             r["long_pct"] = sentiment.get(r["sent_id"]) if r["sent_id"] else None
+        try:
+            got = enrich_with_yahoo(session, rows, now.date())
+            if got < len(rows):
+                notes.append(f"longer technical view (Yahoo): available for {got} of {len(rows)} markets")
+        except Exception:
+            notes.append("longer technical view (Yahoo): unavailable")
         try:
             journal.record_snapshots(now.isoformat(), rows)
             if not journal.baseline_day_recorded(now.date().isoformat()):
