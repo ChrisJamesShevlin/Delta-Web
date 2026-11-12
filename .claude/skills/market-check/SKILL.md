@@ -73,6 +73,8 @@ Opening is one half of this authorisation; managing open positions (step 0) is t
 ## 5. Report
 Say what you saw, what you recorded, what (if anything) is proposed live, and what you do not know. Mention `python3 -m ig_swing.challenge report` for the scored shadow book and the probability check. Keep it short.
 
+**Whenever you place, close, reverse or change anything (a new order, a close, a stop or take-profit move, a trailing stop), tell the user in the chat straight away, in plain text, no artifact and no tables: what you did (market, direction, stake, stop, target, or the old and new level), and why in two to four sentences: what you saw that formed the decision (the move, the news or event, the level, IG sentiment, the spread), how sure you are (your stated win chance) and what would prove you wrong. For a close or a stop move, say what changed since entry. If you looked at something and did nothing, one line on why not.**
+
 ## 6. The learning loop (keep the data clean, do not tune on noise)
 - **Run the full briefing at least once on every day we work.** Each run archives every market's conditions (price, move, volatility, range position, IG client sentiment) in the journal and records that day's mechanical baseline idea per market (long above the 20-day average, else short; 1.5 ATR stop, 3 ATR target, 5 days). Every idea you record automatically saves the conditions at that moment (move in ATRs, range position, IG sentiment, events due, hour, weekday). This is the dataset any later analysis depends on.
 - **Record every idea you seriously consider**, including ones you do not take live, and never edit one afterwards.
