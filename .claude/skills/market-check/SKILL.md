@@ -81,7 +81,7 @@ The user's standing instruction (2026-11-11, for the £45 challenge account only
 
 Place it only if ALL of these hold:
 - Kelly is positive (never use `--ignore-kelly`), the dry run says the order is allowed, and the profile in its first line is `challenge`.
-- The stake fits (the dry run shows it), fewer than two positions are open, none is already open in that market. There is no daily cap on new trades (removed by the user on 2026-11-12); the open-positions, loss, cooldown and floor limits still apply.
+- The stake fits (the dry run shows it), none is already open in that market (there is no cap on the number of open positions, removed 2026-11-13; total open risk 40% still applies). There is no daily cap on new trades (removed by the user on 2026-11-12); the loss, cooldown and floor limits still apply.
 - The market is tradeable and the spread on the dry run is no more than about three times its normal level from the briefing.
 - There is a stated thesis, an invalidation (the stop), and an honest `--p-win`. You recorded the idea first with `idea` (record it live with `--live` if you place it).
 

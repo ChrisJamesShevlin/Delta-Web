@@ -120,5 +120,5 @@ def test_challenge_profile_is_only_chosen_on_live_with_the_explicit_switch(monke
     assert risk_limits("demo") is AGREED                              # never on demo
     monkeypatch.setenv("IG_RISK_PROFILE", "wild")
     assert risk_limits("live") is LIVE_TEST                           # an unknown value never loosens anything
-    assert (CHALLENGE.max_risk_per_trade_pct, CHALLENGE.max_open_positions, CHALLENGE.min_equity_gbp, CHALLENGE.cooldown_losses) == (20.0, 2, 15.0, 2)
+    assert (CHALLENGE.max_risk_per_trade_pct, CHALLENGE.max_open_positions, CHALLENGE.min_equity_gbp, CHALLENGE.cooldown_losses) == (20.0, 50, 15.0, 2)
     assert (CHALLENGE.drawdown_brake_pct, CHALLENGE.drawdown_brake_factor, CHALLENGE.max_total_open_risk_pct) == (25.0, 0.5, 40.0)
