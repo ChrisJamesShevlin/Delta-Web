@@ -134,7 +134,7 @@ def test_briefing_text_contains_the_pieces():
     rows = [{"market": "EUR/USD", "price": 11093.3, "day_pct": 0.1, "atr": 60.0, "atr_pct": 0.54, "range_pos": 0.4, "long_pct": 65.0, "stake": 0.07,
              "note": "margin-limited", "spread_pct": 0.008, "sent_id": "EURUSD"}]
     text = ch.format_briefing(NOW, rows, 45.57, 0, ["x: unavailable"], ["  Fri 13 Nov PPI [HIGH]"], ["  09:00 Fed holds"])
-    for needle in ("Equity £45.57", "Currencies (1)", "EUR/USD", "65% long", "£0.07/pt margin-limited", "Fits the live account at 10% risk (1): EUR/USD", "Shadow book only", "PPI", "Fed holds", "No order has been placed"):
+    for needle in ("Equity £45.57", "Currencies (1)", "EUR/USD", "65% long", "£0.07/pt margin-limited", "Fits the live account at 20% risk (1): EUR/USD", "Shadow book only", "PPI", "Fed holds", "No order has been placed"):
         assert needle in text
 
 
@@ -450,7 +450,9 @@ def test_rule_changelog_date_and_the_review_text():
 
 def test_the_changelog_file_exists_and_is_parseable():
     text = open("RULE_CHANGELOG.md").read()
-    assert ch.last_rule_change(text) == "2026-11-12" and text.count("\n- 20") >= 5
+    import re
+    newest = max(re.findall(r"^- (\d{4}-\d{2}-\d{2})", text, flags=re.M))
+    assert ch.last_rule_change(text) == newest and text.count("\n- 20") >= 5
 
 
 def test_excluded_ideas_stay_in_the_record_but_leave_the_results():

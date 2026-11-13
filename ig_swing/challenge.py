@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from .config import CHALLENGE
 from .macro import format_macro, load_macro
 from .techread import format_tech, long_read, swing_levels, tech_read
 
@@ -445,6 +446,9 @@ def format_report(m: dict[str, Any]) -> str:
 HEAVY_MARGIN_SHARE = 0.6  # a warning level only; the hard limit is the account's own funds
 
 
+BRIEFING_RISK_PCT = CHALLENGE.max_risk_per_trade_pct   # the briefing's fit labels use the profile's per-trade ceiling
+
+
 def stake_hint(equity: float, risk_pct: float, stop_pts: float, price: float, margin_pct: float, min_stake: float = 0.01, max_margin_share: float = 1.0) -> tuple[float, str]:
     """Stake in pounds per point for the chosen risk, limited by margin. Returns (stake, note).
 
@@ -470,7 +474,7 @@ def format_briefing(now: datetime, rows: list[dict], equity: float, positions: i
                     market_news: list[str] | None = None, earnings_text: list[str] | None = None,
                     macro_text: list[str] | None = None) -> str:
     lines = [f"Challenge briefing, {now:%a %d %b %Y %H:%M} UTC. Equity £{equity:.2f}, open positions {positions}", ""]
-    header = f"{'market':16} {'price':>9} {'day':>7} {'ATR pts':>8} {'ATR %':>6} {'20d range':>9} {'IG clients':>11} {'spread':>7}  stake for a 1.5 ATR stop at 10% risk"
+    header = f"{'market':16} {'price':>9} {'day':>7} {'ATR pts':>8} {'ATR %':>6} {'20d range':>9} {'IG clients':>11} {'spread':>7}  stake for a 1.5 ATR stop at {BRIEFING_RISK_PCT:g}% risk"
     for cls in CLASS_ORDER:
         group = [r for r in rows if ASSET_CLASS.get(r["market"]) == cls]
         if not group:
@@ -491,7 +495,7 @@ def format_briefing(now: datetime, rows: list[dict], equity: float, positions: i
         lines.append("")
     fits = [r["market"] for r in rows if r["stake"]]
     shadow = [r["market"] for r in rows if not r["stake"]]
-    lines.append(f"Fits the live account at 10% risk ({len(fits)}): " + (", ".join(fits) or "none"))
+    lines.append(f"Fits the live account at {BRIEFING_RISK_PCT:g}% risk ({len(fits)}): " + (", ".join(fits) or "none"))
     lines.append(f"Shadow book only at this account size ({len(shadow)}): " + (", ".join(shadow) or "none"))
     if macro_text:
         lines += ["", "Macro backdrop (Yahoo, same day; context for currencies, gold and indices, no rule attached):"] + macro_text
@@ -768,13 +772,13 @@ def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.Da
             sma20, tech = None, None
             if name in SHARES:
                 a, atr_pct, range_pos = None, None, None
-                stake, note = stake_hint(equity, 10.0, 0.03 * price, price, margin, snap.min_stake)
+                stake, note = stake_hint(equity, BRIEFING_RISK_PCT, 0.03 * price, price, margin, snap.min_stake)
                 note = (note + " (stop assumed 3% away, no bars)").strip()
             else:
                 bars = clean(client.get_prices(epic, "DAY", 30), now)
                 a = float(atr(bars, 14).iloc[-1])
                 hi, lo = float(bars["high"].tail(20).max()), float(bars["low"].tail(20).min())
-                stake, note = stake_hint(equity, 10.0, 1.5 * a, price, margin, snap.min_stake)
+                stake, note = stake_hint(equity, BRIEFING_RISK_PCT, 1.5 * a, price, margin, snap.min_stake)
                 atr_pct, range_pos = a / price * 100, ((price - lo) / (hi - lo) if hi > lo else None)
                 sma20 = float(bars["close"].tail(20).mean())
                 tech = tech_read(bars, price)
