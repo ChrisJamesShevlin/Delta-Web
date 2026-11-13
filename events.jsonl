@@ -51,3 +51,5 @@
 {"detail": "{\"deal_id\": \"DIAAAASGXM59BAE\", \"r\": 0.049}", "id": 51, "kind": "position_check", "ts": "2026-11-12T17:01:03.559661+00:00"}
 {"detail": "{\"deal_id\": \"DIAAAASG3P7MBBC\", \"r\": -0.012}", "id": 52, "kind": "position_check", "ts": "2026-11-12T17:01:03.559661+00:00"}
 {"detail": "{\"market\": \"France 40\", \"saw\": \"Breakout above the 20-day high 8357, above 50 and 200 day averages, clients 50/50, European indices at records. RSI 77, French bond stress, PPI due 13 Nov 13:30Z.\", \"decision\": \"Opened BUY \\u00a30.01/pt at 8370.2, stop 8210.2, take-profit 8690.2, win chance 0.36. Daily trade cap removed by the user first.\"}", "id": 53, "kind": "check_note", "ts": "2026-11-12T17:01:11.520692+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASGXM59BAE\", \"r\": 0.082}", "id": 54, "kind": "position_check", "ts": "2026-11-13T07:48:23.610431+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASG3P7MBBC\", \"r\": -0.078}", "id": 55, "kind": "position_check", "ts": "2026-11-13T07:48:23.610431+00:00"}
