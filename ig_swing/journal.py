@@ -167,6 +167,13 @@ class Journal:
                            json.dumps(r["tech"]) if r.get("tech") else None))
         return len(rows)
 
+    def latest_snapshots(self, since_ts: str) -> dict[str, dict[str, Any]]:
+        """The newest archived snapshot of every market at or after `since_ts` (an ISO timestamp), keyed by market name."""
+        with self._conn() as c:
+            rows = c.execute("SELECT s.* FROM snapshots s JOIN (SELECT market, MAX(ts) AS mts FROM snapshots WHERE ts>=? GROUP BY market) m "
+                             "ON s.market=m.market AND s.ts=m.mts", (since_ts,)).fetchall()
+        return {r["market"]: dict(r) for r in rows}
+
     def snapshot_counts(self) -> tuple[int, int]:
         """(rows, distinct days) in the archive."""
         with self._conn() as c:

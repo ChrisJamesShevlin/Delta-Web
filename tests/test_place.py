@@ -184,3 +184,12 @@ def test_a_size_that_differs_from_the_confirmed_plan_is_not_placed(tmp_path):
     pl["token"] = place.token_for(pl["market"], pl["direction"], 0.05, pl["stop"], pl["target"])
     r = place.execute(c, j, e, pl, ACCT, NOW, pl["token"], "t", "trend")
     assert not r["placed"] and c.calls == []
+
+
+def test_the_order_plan_warns_about_overlap_without_blocking(tmp_path):
+    c, j, e = make_env(tmp_path)
+    j.open_trade(opened_at=NOW.isoformat(), epic="CS.D.AUDUSD.TODAY.IP", direction="SELL", size=0.01, entry=6800.0, stop=6900.0, risk_gbp=1.0,
+                 env="live", market="AUD/USD")
+    pl = place.plan_order(c, j, e, "EUR/USD", "SELL", 100.0, 200.0, 0.40, ACCT, NOW)
+    assert pl["allowed"] and any("same bet as" in o for o in pl["overlap"])
+    assert "overlap:" in place.describe(pl, 45.57)

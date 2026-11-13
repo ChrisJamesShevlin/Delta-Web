@@ -461,3 +461,13 @@ def test_excluded_ideas_stay_in_the_record_but_leave_the_results():
     ev.append({"kind": ch.EXCLUDED_KIND, "detail": json.dumps({"idea_id": 2, "reason": "no view"})})
     assert [i["id"] for i in ch.load_ideas(ev)] == [1, 2, 3]
     assert [i["id"] for i in ch.scored_ideas(ev)] == [1, 3]
+
+
+def test_the_report_splits_results_by_correlated_market_confirmation():
+    a = idea(idea_id=1)
+    a["features"] = {"confirm": {"label": "confirmed", "n": 4}}
+    b2 = idea(idea_id=2)
+    old = idea(idea_id=3)                                                              # recorded before the field existed
+    b = {"EUR/USD": bars([FLAT, (11000.0, 11250.0, 10995.0, 11200.0)])}
+    text = ch.format_report(ch.measure([a, b2, old], lambda m: b[m]))
+    assert "confirmation confirmed: n=1" in text and "confirmation unknown: n=2" in text

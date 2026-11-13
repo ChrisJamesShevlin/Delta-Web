@@ -410,10 +410,11 @@ def format_report(m: dict[str, Any]) -> str:
     lines = [f"Challenge shadow book: {m['total']} ideas recorded, {len(fin)} finished (n={len(fin)}), {m['pending']} still running"]
     if fin:
         lines.append(f"  all: mean {mean:+.2f}R, SE {('n/a' if se != se else f'{se:.2f}')}, win rate {pct(sum(1 for r in rs if r > 0) / len(rs))}")
-        for label, key in (("playbook", "playbook"), ("confidence", "confidence"), ("research", "research")):
+        for label, key in (("playbook", "playbook"), ("confidence", "confidence"), ("research", "research"), ("confirmation", "confirmation")):
             groups: dict[str, list[float]] = {}
             for i, r in fin:
-                groups.setdefault(i.get(key, "headlines"), []).append(r["r"])
+                val = ((i.get("features") or {}).get("confirm") or {}).get("label", "unknown") if key == "confirmation" else i.get(key, "headlines")
+                groups.setdefault(val, []).append(r["r"])
             for g, xs in sorted(groups.items()):
                 gm, _ = mean_se(xs)
                 lines.append(f"  {label} {g}: n={len(xs)}, mean {gm:+.2f}R" + ("  (under 30: noise)" if len(xs) < 30 else ""))
@@ -887,6 +888,12 @@ def main(argv: list[str] | None = None) -> int:
                 evs_ = []
             features = idea_features(info, atr_pts, range_pos, long_pct, evs_, now)
             features["tech"] = tech_
+            from .themes import confirmation, describe_confirmation, exposure, overlaps
+            conf_ = confirmation(info["name"], direction, journal.latest_snapshots((now - timedelta(hours=36)).isoformat()))
+            open_ = [(t["market"], t["direction"]) for t in journal.open_trades() if t.get("market")]
+            features["themes"] = exposure(info["name"], direction)
+            features["confirm"] = conf_
+            features["overlap"] = overlaps(info["name"], direction, open_)
             idea = make_idea(n, now, info["name"], direction, entry, info["offer"] - info["bid"], args.stop, args.target, args.p_win, args.playbook,
                              args.confidence, args.thesis, args.horizon, args.live, args.research, args.source, info["epic"], features)
             journal.record_event(now.isoformat(), KIND, json.dumps(idea))
@@ -895,6 +902,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Recorded idea {n}: {direction} {info['name']} at {entry}, stop {args.stop:g}, target {args.target:g} (reward to risk {rr:.1f}), p_win {args.p_win:.0%}")
             print(f"  full Kelly {ks * 100:.1f}% of the bankroll, 1/8 Kelly {100 * KELLY_FRACTION * ks:.1f}%; suggested risk {suggested_risk_pct(args.p_win, rr):.1f}% (cap {CAP_UNTIL_CALIBRATED:.0f}% until calibrated)"
                   + ("" if ks > 0 else "  -> Kelly says do not trade this"))
+            print("  Confirmation by correlated markets: " + describe_confirmation(conf_))
+            for o_ in features["overlap"]:
+                print(f"  Overlap: {o_} (a warning only; treat it as one bet)")
             return 0
         if args.cmd == "quick":
             from .indicators import atr

@@ -63,7 +63,9 @@ def plan_order(client: Any, journal: Any, engine: RiskEngine, market: str, direc
     price = (rules.bid + rules.offer) / 2
     entry = rules.offer if direction.upper() == "BUY" else rules.bid
     stake = decision.size
-    return {
+    from .themes import overlaps
+    overlap = overlaps(market, direction, [(t["market"], t["direction"]) for t in journal.open_trades() if t.get("market")])
+    return {"overlap": overlap, 
         "market": market, "epic": epic, "direction": direction.upper(), "stop": stop, "target": target, "reward_risk": rr, "p_win": p_win,
         "kelly": kelly, "kelly_eighth_pct": 100 * KELLY_FRACTION * kelly, "risk_pct_target": risk_pct, "calibrated": calibrated,
         "decision": decision, "reasons": reasons, "allowed": decision.allowed and not (risk_pct <= 0 and not ignore_kelly),
@@ -82,6 +84,7 @@ def describe(plan: dict[str, Any], equity: float) -> str:
         + ("stake follows 1/8 Kelly (calibrated)" if plan["calibrated"] else "stake is the minimum until calibrated (Kelly is a skip filter only)"),
     ]
     lines += [f"  note: {n}" for n in d.notes]
+    lines += [f"  overlap: {o} (a warning only, not a block)" for o in plan.get("overlap", [])]
     if plan["reasons"]:
         lines.append("  REFUSED: " + "; ".join(plan["reasons"]))
     return "\n".join(lines)
