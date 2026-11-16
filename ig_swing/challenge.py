@@ -392,9 +392,14 @@ EARLY_KEYS = {t: f"early_{t:g}" for t in EARLY_TRIGGERS}
 
 
 def measure(ideas: list[dict], get_bars: Callable[[str], pd.DataFrame]) -> dict[str, Any]:
-    finished, pending, pairs = [], 0, []
+    from .ig_client import AllowanceExhausted
+    finished, pending, pairs, unscored = [], 0, [], 0
     for idea in ideas:
-        bars = get_bars(idea.get("epic") or idea["market"])
+        try:
+            bars = get_bars(idea.get("epic") or idea["market"])
+        except AllowanceExhausted:
+            unscored += 1          # IG's weekly price allowance is short: left out of this run, never scored on other data
+            continue
         res = score_idea(idea, bars)
         if res is None:
             pending += 1
@@ -404,7 +409,7 @@ def measure(ideas: list[dict], get_bars: Callable[[str], pd.DataFrame]) -> dict[
         trails.update({EARLY_KEYS[t]: score_idea_trail(idea, bars, 1.0, t) for t in EARLY_TRIGGERS})
         if res is not None and all(t is not None for t in trails.values()):
             pairs.append((idea, res, trails))
-    return {"finished": finished, "pending": pending, "total": len(ideas), "calibration": calibration(finished), "pairs": pairs}
+    return {"finished": finished, "pending": pending, "total": len(ideas), "calibration": calibration(finished), "pairs": pairs, "unscored": unscored}
 
 
 def format_report(m: dict[str, Any]) -> str:
@@ -413,6 +418,8 @@ def format_report(m: dict[str, Any]) -> str:
     mean, se = mean_se(rs)
     pct = lambda v: "n/a" if v != v else f"{v * 100:.0f}%"
     lines = [f"Challenge shadow book: {m['total']} ideas recorded, {len(fin)} finished (n={len(fin)}), {m['pending']} still running"]
+    if m.get("unscored"):
+        lines.append(f"  NOTE: {m['unscored']} idea(s) could not be scored this run because IG's weekly price allowance is short (nothing is scored on other data); run again after it resets")
     if fin:
         lines.append(f"  all: mean {mean:+.2f}R, SE {('n/a' if se != se else f'{se:.2f}')}, win rate {pct(sum(1 for r in rs if r > 0) / len(rs))}")
         for label, key in (("playbook", "playbook"), ("confidence", "confidence"), ("research", "research"), ("confirmation", "confirmation")):
@@ -762,10 +769,29 @@ def tech_for_market(session: Any, info: dict[str, Any], price: float, ig_bars: p
     return row["tech"]
 
 
+YAHOO_BARS_NOTE = ("rescaled Yahoo bars, approximate. Measured 2026-11-16 over 20 days against IG's own bars: index ATRs run about 20% below IG's (Japan 225 32%), "
+                   "silver 37% below, natural gas 37% above, oil 15% above, gold about equal; FX daily bars barely correlate with IG's (different day boundaries); "
+                   "the 20-day range position is off by 5 points on average and 18 at worst. Do not size stops or call a breakout from these bars alone")
+
+
+def fallback_bars(session: Any, name: str, epic: str, price: float, now: datetime) -> pd.DataFrame | None:
+    """Daily bars from Yahoo, rescaled so the latest close equals IG's price, for when IG's weekly price allowance is short. None if Yahoo has no
+    series for the market or the call fails. Callers must flag anything built on these bars (bar_source "yahoo_scaled")."""
+    from .yahoo_bars import load_daily, scale_to, symbol_for
+    sym = symbol_for(name, epic, ticker_for(name, epic))
+    if not sym:
+        return None
+    df = load_daily(session, sym, now.date())
+    return None if df is None else scale_to(df, price)
+
+
 def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.DataFrame, datetime], pd.DataFrame],
                markets: dict[str, tuple[str, str, float]] | None = None) -> tuple[list[dict], list[str]]:
+    from .ig_client import AllowanceExhausted
     from .indicators import atr
     rows, notes = [], []
+    fell_back: list[str] = []
+    yahoo_session = None
     markets = MARKETS if markets is None else markets
     try:
         snaps = batch_snapshots(client, [v[0] for v in markets.values()])
@@ -785,18 +811,34 @@ def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.Da
                 stake, note = stake_hint(equity, BRIEFING_RISK_PCT, 0.03 * price, price, margin, snap.min_stake)
                 note = (note + " (stop assumed 3% away, no bars)").strip()
             else:
-                bars = clean(client.get_prices(epic, "DAY", 30), now)
+                source = "ig"
+                try:
+                    bars = clean(client.get_prices(epic, "DAY", 30), now)
+                except AllowanceExhausted:
+                    if yahoo_session is None:
+                        import requests as _rq
+                        yahoo_session = _rq.Session()
+                    bars = fallback_bars(yahoo_session, name, epic, price, now)
+                    if bars is None:
+                        raise
+                    bars = bars.tail(40).reset_index(drop=True)
+                    source = "yahoo_scaled"
+                    fell_back.append(name)
                 a = float(atr(bars, 14).iloc[-1])
                 hi, lo = float(bars["high"].tail(20).max()), float(bars["low"].tail(20).min())
                 stake, note = stake_hint(equity, BRIEFING_RISK_PCT, 1.5 * a, price, margin, snap.min_stake)
                 atr_pct, range_pos = a / price * 100, ((price - lo) / (hi - lo) if hi > lo else None)
                 sma20 = float(bars["close"].tail(20).mean())
                 tech = tech_read(bars, price)
+                if tech is not None and source != "ig":
+                    tech["bar_source"] = source
             rows.append({"market": name, "epic": epic, "bid": snap.bid, "offer": snap.offer, "sma20": sma20, "price": price, "day_pct": snap.pct_change or 0.0, "atr": a, "atr_pct": atr_pct,
                          "range_pos": range_pos, "long_pct": None, "stake": stake, "note": note,
                          "spread_pct": (snap.offer - snap.bid) / price * 100, "sent_id": sent_id or snap.sent_id or "", "tech": tech})
         except Exception as exc:  # type name only
             notes.append(f"{name}: unavailable ({type(exc).__name__})")
+    if fell_back:
+        notes.append(f"IG's weekly price allowance is short, so {len(fell_back)} market(s) use {YAHOO_BARS_NOTE}: " + ", ".join(fell_back))
     return rows, notes
 
 
@@ -870,10 +912,20 @@ def main(argv: list[str] | None = None) -> int:
             entry = info["offer"] if direction == "BUY" else info["bid"]
             n = len(load_ideas(journal.events())) + 1
             atr_pts, range_pos, tech_ = None, None, None
+            bar_source = "ig"
             try:
+                from .ig_client import AllowanceExhausted
                 from .indicators import atr as atr_fn
-                bars_ = clean_daily(client.get_prices(info["epic"], "DAY", 30), now)
                 import requests as _rq
+                try:
+                    bars_ = clean_daily(client.get_prices(info["epic"], "DAY", 30, essential=True), now)
+                except AllowanceExhausted:
+                    bars_ = fallback_bars(_rq.Session(), info["name"], info["epic"], (info["bid"] + info["offer"]) / 2, now)
+                    if bars_ is None:
+                        raise
+                    bars_ = bars_.tail(40).reset_index(drop=True)
+                    bar_source = "yahoo_scaled"
+                    print(f"  note: IG's price allowance is short, so the ATR and range use {YAHOO_BARS_NOTE}")
                 tech_ = tech_for_market(_rq.Session(), info, (info["bid"] + info["offer"]) / 2, bars_, now.date())
                 atr_pts = float(atr_fn(bars_, 14).iloc[-1])
                 lo_, hi_ = float(bars_["low"].tail(20).min()), float(bars_["high"].tail(20).max())
@@ -897,6 +949,7 @@ def main(argv: list[str] | None = None) -> int:
                 evs_ = []
             features = idea_features(info, atr_pts, range_pos, long_pct, evs_, now)
             features["tech"] = tech_
+            features["bar_source"] = bar_source
             from .themes import confirmation, describe_confirmation, exposure, overlaps
             conf_ = confirmation(info["name"], direction, journal.latest_snapshots((now - timedelta(hours=36)).isoformat()))
             open_ = [(t["market"], t["direction"]) for t in journal.open_trades() if t.get("market")]
@@ -920,9 +973,20 @@ def main(argv: list[str] | None = None) -> int:
             info = resolve_market(client, args.market)
             epic, sent_id = info["epic"], info["sent_id"]
             equity = client.get_account(creds.account_id).equity
-            bars = clean_daily(client.get_prices(epic, "DAY", 30), now)
+            from .ig_client import AllowanceExhausted
+            quick_price = (info["bid"] + info["offer"]) / 2
             try:
-                hourly = client.get_prices(epic, "HOUR", 24)
+                bars = clean_daily(client.get_prices(epic, "DAY", 30, essential=True), now)
+                bar_note = ""
+            except AllowanceExhausted:
+                import requests as _rq3
+                bars = fallback_bars(_rq3.Session(), info["name"], epic, quick_price, now)
+                if bars is None:
+                    raise
+                bars = bars.tail(40).reset_index(drop=True)
+                bar_note = f"  note: IG's price allowance is short, so the ATR, range and technical read use {YAHOO_BARS_NOTE}"
+            try:
+                hourly = client.get_prices(epic, "HOUR", 24, essential=True) if not bar_note else None
             except Exception:
                 hourly = None
             long_pct = batch_sentiment(client, [sent_id]).get(sent_id) if sent_id else None
@@ -934,6 +998,8 @@ def main(argv: list[str] | None = None) -> int:
             import requests
 
             print("  Technical read: " + format_tech(tech_for_market(requests.Session(), info, quick_info["price"], bars, now.date())))
+            if bar_note:
+                print(bar_note)
 
             from .config import optional_key
             from .events import load_events
@@ -1025,6 +1091,9 @@ def main(argv: list[str] | None = None) -> int:
                 notes.append("archive: macro backdrop could not be written")
         else:
             notes.append("macro backdrop (Yahoo): unavailable")
+        allowance_line = client.allowance_text()
+        if allowance_line:
+            notes.insert(0, allowance_line)
         print(format_briefing(now, rows, acct.equity, len(client.get_positions()), notes + ev_notes + hd_notes, ev_text, hd_text, market_news, earnings_text,
                               format_macro(macro)))
         limits = risk_limits(env)

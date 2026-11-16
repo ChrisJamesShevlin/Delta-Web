@@ -235,6 +235,54 @@ def test_build_rows_covers_only_the_markets_it_is_given():
     assert [r["market"] for r in rows_two] == ["Gold", "US 500"]
 
 
+def test_build_rows_falls_back_to_rescaled_yahoo_bars_when_the_allowance_is_short(monkeypatch):
+    import numpy as np
+    from ig_swing.ig_client import AllowanceExhausted
+
+    class C:
+        def _call(self, method, path, version, params=None, context=""):
+            return {"marketDetails": [{"instrument": {"epic": e}, "snapshot": {"bid": 99.0, "offer": 101.0, "percentageChange": 0.5, "netChange": 0.5, "marketStatus": "TRADEABLE"}} for e in params["epics"].split(",")]}
+
+        def get_prices(self, epic, res, n, **kw):
+            raise AllowanceExhausted("44 price points left")
+
+    def fake_fallback(session, name, epic, price, now):
+        c = np.linspace(900, 1000, 40)
+        return pd.DataFrame({"timestamp": pd.bdate_range("2026-09-01", periods=40), "open": c / 10, "high": c / 10 + 1, "low": c / 10 - 1, "close": c / 10})
+
+    monkeypatch.setattr(ch, "fallback_bars", fake_fallback)
+    two = {k: ch.MARKETS[k] for k in ("Gold", "US 500")}
+    rows, notes = ch.build_rows(C(), 45.57, NOW, lambda df, now: df, two)
+    assert [r["market"] for r in rows] == ["Gold", "US 500"] and all(r["tech"]["bar_source"] == "yahoo_scaled" for r in rows)
+    assert any("weekly price allowance is short" in n and "Gold, US 500" in n and "approximate" in n for n in notes)
+
+
+def test_a_market_with_no_fallback_is_reported_unavailable_not_invented(monkeypatch):
+    from ig_swing.ig_client import AllowanceExhausted
+
+    class C:
+        def _call(self, method, path, version, params=None, context=""):
+            return {"marketDetails": [{"instrument": {"epic": e}, "snapshot": {"bid": 99.0, "offer": 101.0, "marketStatus": "TRADEABLE"}} for e in params["epics"].split(",")]}
+
+        def get_prices(self, epic, res, n, **kw):
+            raise AllowanceExhausted("0 left")
+
+    monkeypatch.setattr(ch, "fallback_bars", lambda *a, **k: None)
+    rows, notes = ch.build_rows(C(), 45.57, NOW, lambda df, now: df, {"Gold": ch.MARKETS["Gold"]})
+    assert rows == [] and any("Gold: unavailable (AllowanceExhausted)" in n for n in notes)
+
+
+def test_measure_skips_ideas_it_cannot_price_and_says_so():
+    from ig_swing.ig_client import AllowanceExhausted
+
+    def short(_key):
+        raise AllowanceExhausted("none left")
+
+    m = ch.measure([idea()], short)
+    assert m["unscored"] == 1 and m["finished"] == [] and m["pending"] == 0
+    assert "could not be scored this run" in ch.format_report(m)
+
+
 class SearchClient:
     """A fake IG client with a search and a batch market call."""
 

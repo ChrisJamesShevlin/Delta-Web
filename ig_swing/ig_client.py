@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from datetime import date, datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -176,9 +177,34 @@ class PriceCache:
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
-    def save_allowance(self, remaining: int) -> None:
+    def save_allowance(self, remaining: int, total: int | None = None, resets_in_seconds: float | None = None) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
-        (self.directory / "allowance.json").write_text(json.dumps({"remaining": int(remaining)}))
+        data: dict[str, Any] = {"remaining": int(remaining), "saved_at": time.time()}
+        if total is not None:
+            data["total"] = int(total)
+        if resets_in_seconds is not None:
+            data["resets_at"] = time.time() + float(resets_in_seconds)
+        (self.directory / "allowance.json").write_text(json.dumps(data))
+
+    def load_allowance_info(self) -> dict[str, Any] | None:
+        """remaining, and when known total and resets_at (epoch seconds), as last seen in a price response."""
+        try:
+            data = json.loads((self.directory / "allowance.json").read_text())
+            int(data["remaining"])
+            return data
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    # One growing store of COMPLETE daily bars per market, so a request of any size is served from it and only the newest bars are fetched.
+    def load_bars(self, key: str) -> list[dict]:
+        try:
+            return list(json.loads((self.directory / f"{key}_bars.json").read_text())["rows"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return []
+
+    def save_bars(self, key: str, rows: list[dict]) -> None:
+        self.directory.mkdir(parents=True, exist_ok=True)
+        (self.directory / f"{key}_bars.json").write_text(json.dumps({"rows": rows}))
 
 
 def _error_code(resp: Any) -> str | None:
@@ -201,6 +227,37 @@ MIN_GAP_SECONDS = 2.0
 RETRY_WAIT_SECONDS = 15.0
 RETRY_STATUSES = (429, 502, 503, 504)
 RETRY_CODE_PARTS = ("exceeded-api-key-allowance", "exceeded-account-allowance")
+
+
+# Price allowance (added 2026-11-16). IG gives this key 10,000 historical price points a week. Daily bars of any request size now come from one growing
+# store per market (only the newest bars are fetched), and non-essential pulls leave a reserve so a market the user is trading can always be read.
+RESERVE_POINTS = 300
+MAX_INCREMENTAL_POINTS = 200
+EXTRA_POINTS = 3          # the unfinished current bar and an overlap, so a fetch never leaves a gap
+
+
+def _utc_today() -> date:
+    return datetime.now(timezone.utc).date()
+
+
+def _prev_weekday(d: date) -> date:
+    d -= timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def _weekdays_between(last: date, today: date) -> int:
+    """Weekdays after ``last`` and before ``today``."""
+    n, d = 0, last + timedelta(days=1)
+    while d < today:
+        n += d.weekday() < 5
+        d += timedelta(days=1)
+    return n
+
+
+def _row_date(row: dict) -> date:
+    return pd.Timestamp(row["timestamp"]).date()
 
 
 def _is_retryable(status: int, code: str | None) -> bool:
@@ -429,30 +486,74 @@ class IGClient:
             )
         return out
 
-    def get_prices(self, epic: str, resolution: str = "DAY", num_points: int = 60) -> pd.DataFrame:
-        """Fetch OHLC bars. Cached, and guarded by the historical price allowance."""
-        key = f"{epic}_{resolution}_{num_points}"
-        rows = self._cache.load(key)
-        if rows is None:
-            remaining = self._cache.load_allowance()
-            if remaining is not None and remaining < num_points:
-                raise AllowanceExhausted(f"{remaining} price points left, {num_points} requested")
-            data = self._call(
-                "GET", f"/prices/{epic}/{resolution}/{num_points}", "2", context="prices"
-            )
-            rows = self._parse_prices(data)
-            self._cache.save(key, rows)
-            # Verified live: the allowance sits at the top level of the response.
-            allowance = data.get("allowance") or (data.get("metadata") or {}).get("allowance") or {}
-            try:
-                self._cache.save_allowance(int(allowance["remainingAllowance"]))
-            except (KeyError, TypeError, ValueError):
-                pass
+    def _guard_allowance(self, num_points: int, essential: bool) -> None:
+        remaining = self._cache.load_allowance()
+        if remaining is None:
+            return
+        reserve = 0 if essential else RESERVE_POINTS
+        if remaining < num_points + reserve:
+            raise AllowanceExhausted(f"{remaining} price points left, {num_points} requested" + ("" if essential else f" (reserve {reserve} kept for markets being traded)"))
+
+    def _remember_allowance(self, data: dict) -> None:
+        # Verified live: the allowance sits at the top level of the response.
+        allowance = data.get("allowance") or (data.get("metadata") or {}).get("allowance") or {}
+        try:
+            self._cache.save_allowance(int(allowance["remainingAllowance"]), allowance.get("totalAllowance"), allowance.get("allowanceExpiry"))
+        except (KeyError, TypeError, ValueError):
+            pass
+
+    def allowance_text(self) -> str | None:
+        """One line for the briefing: points left, the weekly total and the reset time, as last seen in a price response."""
+        info = self._cache.load_allowance_info()
+        if info is None:
+            return None
+        text = f"IG price allowance: {info['remaining']}" + (f" of {info['total']}" if info.get("total") else "") + " points left"
+        if info.get("resets_at"):
+            hours = max(0.0, (float(info["resets_at"]) - time.time()) / 3600)
+            text += f", resets in about {hours:.0f} hours"
+        return text
+
+    def get_prices(self, epic: str, resolution: str = "DAY", num_points: int = 60, *, essential: bool = False) -> pd.DataFrame:
+        """Fetch OHLC bars, guarded by the historical price allowance. ``essential`` reads (a market being traded) may use the reserve.
+
+        Daily bars of up to 200 points come from one store per market holding complete bars only (nothing dated today): a request is served from
+        it, and only the bars missing since the last stored one are fetched. Other requests use the older per-size cache."""
+        if resolution == "DAY" and num_points <= MAX_INCREMENTAL_POINTS:
+            rows = self._daily_from_store(epic, num_points, essential)
+        else:
+            key = f"{epic}_{resolution}_{num_points}"
+            rows = self._cache.load(key)
+            if rows is None:
+                self._guard_allowance(num_points, essential)
+                data = self._call("GET", f"/prices/{epic}/{resolution}/{num_points}", "2", context="prices")
+                rows = self._parse_prices(data)
+                self._cache.save(key, rows)
+                self._remember_allowance(data)
         if not rows:
             raise MarketDataError("No price data returned")
         df = pd.DataFrame(rows)
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         return df.sort_values("timestamp").reset_index(drop=True)
+
+    def _daily_from_store(self, epic: str, num_points: int, essential: bool) -> list[dict]:
+        key = f"{epic}_DAY"
+        today = _utc_today()
+        store = [r for r in self._cache.load_bars(key) if _row_date(r) < today]
+        last = max((_row_date(r) for r in store), default=None)
+        if len(store) < num_points or last is None:
+            fetch = num_points + EXTRA_POINTS
+        elif last >= _prev_weekday(today):
+            return store[-num_points:]
+        else:
+            fetch = min(num_points + EXTRA_POINTS, _weekdays_between(last, today) + EXTRA_POINTS)
+        self._guard_allowance(fetch, essential)
+        data = self._call("GET", f"/prices/{epic}/DAY/{fetch}", "2", context="prices")
+        merged = {r["timestamp"]: r for r in store}
+        merged.update({r["timestamp"]: r for r in self._parse_prices(data)})
+        rows = sorted((r for r in merged.values() if _row_date(r) < today), key=lambda r: pd.Timestamp(r["timestamp"]))
+        self._cache.save_bars(key, rows)
+        self._remember_allowance(data)
+        return rows[-num_points:]
 
     @staticmethod
     def _parse_prices(data: dict) -> list[dict]:

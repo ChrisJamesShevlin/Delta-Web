@@ -243,8 +243,10 @@ def prices_response(remaining=9000):
     )
 
 
-def test_prices_parse_sort_and_second_call_uses_cache(tmp_path):
-    path = f"/prices/{EPIC}/DAY/2"
+def test_prices_parse_sort_and_second_call_uses_cache(tmp_path, monkeypatch):
+    import ig_swing.ig_client as igc
+    monkeypatch.setattr(igc, "_utc_today", lambda: __import__("datetime").date(2026, 11, 11))
+    path = f"/prices/{EPIC}/DAY/5"
     c, s = client({("GET", path): [prices_response()]}, tmp_path)
     df = c.get_prices(EPIC, "DAY", 2)
     assert list(df["close"]) == [100.0, 105.0]  # sorted oldest first, mid of bid/ask
@@ -252,8 +254,10 @@ def test_prices_parse_sort_and_second_call_uses_cache(tmp_path):
     assert s.paths().count(("GET", path)) == 1
 
 
-def test_pull_saves_the_remaining_allowance_from_the_real_response_shape(tmp_path):
-    path = f"/prices/{EPIC}/DAY/2"
+def test_pull_saves_the_remaining_allowance_from_the_real_response_shape(tmp_path, monkeypatch):
+    import ig_swing.ig_client as igc
+    monkeypatch.setattr(igc, "_utc_today", lambda: __import__("datetime").date(2026, 11, 11))
+    path = f"/prices/{EPIC}/DAY/5"
     c, _ = client({("GET", path): [prices_response(remaining=9936)]}, tmp_path)
     c.get_prices(EPIC, "DAY", 2)
     assert PriceCache(tmp_path).load_allowance() == 9936
@@ -364,3 +368,59 @@ def test_orders_are_never_retried_or_delayed():
     with pytest.raises(IGError):
         c._call("POST", "/positions/otc", "2", body={}, context="place order")
     assert len([p for p in session.paths() if p[1] == "/positions/otc"]) == 1 and sleeps == []
+
+
+# ---- the growing daily-bar store and the allowance reserve (added 2026-11-16) ---
+
+import datetime as _dt
+
+
+def _days(*dates):
+    return FakeResponse(200, {"prices": [price_row(f"{d}T00:00:00", 100 + i, 110, 90, 105 + i) for i, d in enumerate(dates)],
+                              "allowance": {"remainingAllowance": 9000, "totalAllowance": 10000, "allowanceExpiry": 3600}})
+
+
+def _at(monkeypatch, y, m, d):
+    import ig_swing.ig_client as igc
+    monkeypatch.setattr(igc, "_utc_today", lambda: _dt.date(y, m, d))
+
+
+def test_any_request_size_is_served_from_one_store_and_costs_nothing_again(tmp_path, monkeypatch):
+    _at(monkeypatch, 2026, 11, 12)                       # Thursday
+    c, s = client({("GET", f"/prices/{EPIC}/DAY/8"): [_days("2026-11-10", "2026-11-09", "2026-11-11", "2026-11-12")]}, tmp_path)
+    df = c.get_prices(EPIC, "DAY", 5)
+    assert list(df["timestamp"].dt.day) == [9, 10, 11]   # the unfinished bar of today (12th) is not stored or returned
+    c.get_prices(EPIC, "DAY", 3)
+    c.get_prices(EPIC, "DAY", 2)
+    assert [p for p in s.paths() if p[1].startswith("/prices")] == [("GET", f"/prices/{EPIC}/DAY/8")]
+
+
+def test_a_later_day_fetches_only_the_missing_bars(tmp_path, monkeypatch):
+    _at(monkeypatch, 2026, 11, 12)
+    c, s = client({("GET", f"/prices/{EPIC}/DAY/6"): [_days("2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12")],
+                   ("GET", f"/prices/{EPIC}/DAY/5"): [_days("2026-11-12", "2026-11-13", "2026-11-15")]}, tmp_path)
+    c.get_prices(EPIC, "DAY", 3)
+    _at(monkeypatch, 2026, 11, 16)                       # Monday: Thursday's and Friday's bars are missing, so 2 + 3 points are fetched, not 6
+    df = c.get_prices(EPIC, "DAY", 3)
+    assert [p for p in s.paths() if p[1].startswith("/prices")] == [("GET", f"/prices/{EPIC}/DAY/6"), ("GET", f"/prices/{EPIC}/DAY/5")]
+    assert list(df["timestamp"].dt.day) == [12, 13, 15]
+
+
+def test_the_reserve_blocks_routine_pulls_but_not_essential_ones(tmp_path):
+    cache = PriceCache(tmp_path)
+    cache.save_allowance(310)
+    session = FakeSession({("POST", "/session"): [LOGIN_OK], ("GET", f"/prices/{EPIC}/DAY/33"): [_days("2026-11-10", "2026-11-11")]})
+    c = IGClient(CREDS, session=session, cache=cache)
+    with pytest.raises(AllowanceExhausted):
+        c.get_prices(EPIC, "DAY", 30)
+    assert not [p for p in session.paths() if p[1].startswith("/prices")]
+    c.get_prices(EPIC, "DAY", 30, essential=True)
+    assert [p for p in session.paths() if p[1].startswith("/prices")]
+
+
+def test_allowance_text_shows_points_total_and_reset(tmp_path):
+    cache = PriceCache(tmp_path)
+    c = IGClient(CREDS, session=FakeSession({}), cache=cache)
+    assert c.allowance_text() is None
+    cache.save_allowance(44, 10000, 51 * 3600)
+    assert c.allowance_text() == "IG price allowance: 44 of 10000 points left, resets in about 51 hours"
