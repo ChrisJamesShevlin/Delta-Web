@@ -297,3 +297,70 @@ def test_confirm_accepted_returns_details(tmp_path):
     c, _ = client({("GET", "/confirms/R2"): [FakeResponse(200, body)]}, tmp_path)
     conf = c.confirm_deal("R2")
     assert conf.deal_id == "D9" and conf.stop_level == 4951.0
+
+
+# ---- pacing, retry and error text (added 2026-11-16) ----------------------
+
+def paced_client(routes, **kw):
+    from ig_swing.ig_client import IGClient
+    routes = {("POST", "/session"): [LOGIN_OK], **routes}
+    session = FakeSession(routes)
+    sleeps: list[float] = []
+    t = [0.0]
+    c = IGClient(CREDS, session=session, sleep=lambda s: (sleeps.append(s), t.__setitem__(0, t[0] + s)), clock=lambda: t[0], **kw)
+    return c, session, sleeps
+
+
+def test_safe_error_text_shows_status_and_code_for_ig_errors_only():
+    from ig_swing.ig_client import safe_error_text
+    assert safe_error_text(IGError(403, "error.public-api.exceeded-api-key-allowance", "market rules")) == (
+        "IG market rules failed: HTTP 403 (error.public-api.exceeded-api-key-allowance)")
+    assert safe_error_text(ValueError("secret detail")) == "ValueError"
+
+
+def test_reads_are_spaced_by_the_minimum_gap():
+    c, session, sleeps = paced_client({("GET", "/accounts"): [FakeResponse(200, {"accounts": []})]}, min_gap_seconds=2.0, retry_wait_seconds=5.0)
+    c._call("GET", "/accounts", "1", context="a")
+    c._call("GET", "/accounts", "1", context="a")
+    c._call("GET", "/accounts", "1", context="a")
+    assert sleeps == [2.0, 2.0]
+
+
+def test_default_pacing_is_off_for_an_injected_session_and_on_for_a_real_one():
+    from ig_swing.ig_client import MIN_GAP_SECONDS, IGClient
+    assert IGClient(CREDS, session=FakeSession({}))._min_gap == 0.0
+    assert IGClient(CREDS)._min_gap == MIN_GAP_SECONDS
+
+
+def test_a_rate_limited_read_is_retried_once_then_succeeds():
+    limited = FakeResponse(403, {"errorCode": "error.public-api.exceeded-api-key-allowance"})
+    c, session, sleeps = paced_client({("GET", "/accounts"): [limited, FakeResponse(200, {"accounts": [1]})]}, min_gap_seconds=0.0, retry_wait_seconds=7.0)
+    assert c._call("GET", "/accounts", "1", context="a") == {"accounts": [1]}
+    assert sleeps == [7.0]
+    assert [p for p in session.paths() if p[1] == "/accounts"] == [("GET", "/accounts")] * 2
+
+
+def test_a_read_that_keeps_failing_is_tried_twice_and_then_raises():
+    limited = FakeResponse(403, {"errorCode": "error.public-api.exceeded-account-allowance"})
+    c, session, sleeps = paced_client({("GET", "/accounts"): [limited]}, min_gap_seconds=0.0, retry_wait_seconds=1.0)
+    with pytest.raises(IGError) as e:
+        c._call("GET", "/accounts", "1", context="a")
+    assert e.value.status == 403
+    assert len([p for p in session.paths() if p[1] == "/accounts"]) == 2
+
+
+def test_other_errors_and_the_weekly_history_allowance_are_not_retried():
+    for resp in (FakeResponse(400, {"errorCode": "error.public-api.failure.bad"}),
+                 FakeResponse(403, {"errorCode": "error.public-api.exceeded-account-historical-data-allowance"})):
+        c, session, sleeps = paced_client({("GET", "/accounts"): [resp]}, min_gap_seconds=0.0, retry_wait_seconds=1.0)
+        with pytest.raises(IGError):
+            c._call("GET", "/accounts", "1", context="a")
+        assert len([p for p in session.paths() if p[1] == "/accounts"]) == 1 and sleeps == []
+
+
+def test_orders_are_never_retried_or_delayed():
+    limited = FakeResponse(429, {"errorCode": "error.public-api.exceeded-api-key-allowance"})
+    c, session, sleeps = paced_client({("POST", "/positions/otc"): [limited]}, min_gap_seconds=2.0, retry_wait_seconds=1.0)
+    with pytest.raises(IGError):
+        c._call("POST", "/positions/otc", "2", body={}, context="place order")
+    assert len([p for p in session.paths() if p[1] == "/positions/otc"]) == 1 and sleeps == []

@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(df)} clean bars, {df['timestamp'].iloc[0]:%Y-%m-%d} to {df['timestamp'].iloc[-1]:%Y-%m-%d}, saved to {DEFAULT_PATH}")
         return 0
     from .config import base_url, ig_env, load_credentials
-    from .ig_client import IGClient
+    from .ig_client import IGClient, safe_error_text
 
     try:
         env = ig_env()
@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         df = fetch_history(client, args.bars)
         remaining = client._cache.load_allowance()
     except Exception as exc:  # type name only: messages can carry sensitive detail
-        print(f"FAILED: {type(exc).__name__}")
+        print(f"FAILED: {safe_error_text(exc)}")
         return 1
     print(f"{len(df)} bars of {HISTORY_EPIC}, {df['timestamp'].iloc[0]:%Y-%m-%d} to {df['timestamp'].iloc[-1]:%Y-%m-%d}, saved to {DEFAULT_PATH}")
     print(f"Price allowance remaining: {remaining}")

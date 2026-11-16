@@ -82,14 +82,14 @@ def build_panel(frames: dict[str, pd.DataFrame], today: pd.Timestamp | None = No
 
 def fetch_all(cache: Path = CACHE_DIR) -> int:
     from .config import base_url, ig_env, load_credentials
-    from .ig_client import IGClient
+    from .ig_client import IGClient, safe_error_text
 
     cache.mkdir(parents=True, exist_ok=True)
     try:
         env = ig_env()
         client = IGClient(load_credentials(env), base_url=base_url(env), allow_live=(env == "live"))
     except Exception as exc:
-        print(f"FAILED: {type(exc).__name__}")
+        print(f"FAILED: {safe_error_text(exc)}")
         return 1
     done = 0
     for name, m in MARKETS.items():

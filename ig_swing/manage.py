@@ -30,7 +30,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from .ig_client import IGError, OrderRejected, Position
+from .ig_client import IGError, OrderRejected, Position, safe_error_text
 
 UTC = timezone.utc
 REASON_TYPES = ("thesis_invalidated", "new_information", "time", "risk_event", "reversal", "profit_taking", "other")
@@ -427,7 +427,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"REFUSED: {exc}")
         return 1
     except Exception as exc:  # type name only: messages can carry sensitive detail
-        print(f"FAILED: {type(exc).__name__}")
+        print(f"FAILED: {safe_error_text(exc)}")
         return 1
     return 0
 

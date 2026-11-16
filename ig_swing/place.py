@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .bars import clean_daily
     from .config import base_url, ig_env, load_credentials, risk_limits
-    from .ig_client import IGClient
+    from .ig_client import IGClient, safe_error_text
     from .journal import Journal
     from .risk import KillSwitch
 
@@ -175,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
         print(("PLACED: " if res["placed"] else "NOT PLACED: ") + res["status"] + (f", deal {res['deal_id']}, stake £{res['size']}, stop level {res['stop_level']}" if res["placed"] else ""))
         return 0 if res["placed"] else 1
     except Exception as exc:  # type name only: messages can carry sensitive detail
-        print(f"FAILED: {type(exc).__name__}")
+        print(f"FAILED: {safe_error_text(exc)}")
         return 1
 
 

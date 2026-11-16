@@ -189,6 +189,24 @@ def _error_code(resp: Any) -> str | None:
         return None
 
 
+def safe_error_text(exc: BaseException) -> str:
+    """Text safe to print for a failed call: an IGError holds only the HTTP status, IG's errorCode and the call's name, so it is shown in full.
+    Any other exception shows its type name only, because its message could carry sensitive detail."""
+    return str(exc) if isinstance(exc, IGError) else type(exc).__name__
+
+
+# Pacing (added 2026-11-16 after bare IGError failures that came straight after a 30-call briefing burst). IG limits non-trading requests per
+# minute; the exact figure for this account is unverified, so reads are spaced out and a rate-limit style failure is retried ONCE.
+MIN_GAP_SECONDS = 2.0
+RETRY_WAIT_SECONDS = 15.0
+RETRY_STATUSES = (429, 502, 503, 504)
+RETRY_CODE_PARTS = ("exceeded-api-key-allowance", "exceeded-account-allowance")
+
+
+def _is_retryable(status: int, code: str | None) -> bool:
+    return status in RETRY_STATUSES or any(part in (code or "") for part in RETRY_CODE_PARTS)
+
+
 def _num(value: Any) -> float | None:
     try:
         return None if value is None else float(value)
@@ -220,6 +238,10 @@ class IGClient:
         live_orders_enabled: bool = False,
         session: Any = None,
         cache: PriceCache | None = None,
+        min_gap_seconds: float | None = None,
+        retry_wait_seconds: float | None = None,
+        sleep: Any = time.sleep,
+        clock: Any = time.monotonic,
     ):
         if base_url == LIVE_BASE_URL:
             if allow_live is not True:
@@ -234,6 +256,13 @@ class IGClient:
         self._cache = cache or PriceCache()
         self._cst: str | None = None
         self._xst: str | None = None
+        # Real sessions are paced by default. An injected (test) session is not, unless the caller asks.
+        paced = session is None
+        self._min_gap = (MIN_GAP_SECONDS if paced else 0.0) if min_gap_seconds is None else float(min_gap_seconds)
+        self._retry_wait = (RETRY_WAIT_SECONDS if paced else 0.0) if retry_wait_seconds is None else float(retry_wait_seconds)
+        self._sleep = sleep
+        self._clock = clock
+        self._last_read: float | None = None
 
     # ---- transport -------------------------------------------------------
 
@@ -263,12 +292,27 @@ class IGClient:
             timeout=TIMEOUT_SECONDS,
         )
 
+    def _pace(self, method: str) -> None:
+        """Keep reads at least min_gap seconds apart. Order calls are never delayed."""
+        if method != "GET" or self._min_gap <= 0:
+            return
+        now = self._clock()
+        if self._last_read is not None and now - self._last_read < self._min_gap:
+            self._sleep(self._min_gap - (now - self._last_read))
+        self._last_read = self._clock()
+
     def _call(self, method, path, version, *, params=None, body=None, extra=None, context="request"):
         if not self._cst:
             self.login()
+        self._pace(method)
         resp = self._send(method, path, version, params, body, extra)
         if resp.status_code == 401 and _error_code(resp) == INVALID_TOKEN_CODE:
             self.login()
+            resp = self._send(method, path, version, params, body, extra)
+        # One retry, reads only: repeating an order, close or amend could double it.
+        if resp.status_code != 200 and method == "GET" and _is_retryable(resp.status_code, _error_code(resp)):
+            self._sleep(self._retry_wait)
+            self._last_read = self._clock()
             resp = self._send(method, path, version, params, body, extra)
         if resp.status_code != 200:
             raise IGError(resp.status_code, _error_code(resp), context)

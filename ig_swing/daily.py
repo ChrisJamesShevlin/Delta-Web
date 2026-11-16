@@ -17,7 +17,7 @@ from typing import Any
 from .bars import clean_daily
 from .context import ContextVerdict, assess, plan_context_reductions, view_stance
 from .events import Event
-from .ig_client import Position
+from .ig_client import Position, safe_error_text
 from .inputs import CrossAssetInput
 from .news import Headline
 from .news_view import NewsView, format_view, load_view
@@ -188,7 +188,7 @@ def main() -> int:
                           env=env, events=events, now=now, inputs=inputs, headlines=headlines,
                           history_epic=HISTORY_EPIC, view=view, view_note=view_note, backdrop=backdrop)
     except Exception as exc:  # type name only: messages can carry sensitive detail
-        print(f"FAILED: {type(exc).__name__}")
+        print(f"FAILED: {safe_error_text(exc)}")
         return 1
     print(f"Environment: {env.upper()}  market: {epic}")
     print(format_plan(plan))

@@ -144,7 +144,7 @@ def format_evaluation(res: dict[str, Any]) -> str:
 def main() -> int:
     from .config import base_url, ig_env, load_credentials
     from .daily import HISTORY_EPIC
-    from .ig_client import IGClient
+    from .ig_client import IGClient, safe_error_text
     from .journal import Journal
 
     try:
@@ -158,7 +158,7 @@ def main() -> int:
         df = client.get_prices(HISTORY_EPIC, "DAY", 120)
         print(format_evaluation(evaluate(ideas, df)))
     except Exception as exc:  # type name only: messages can carry sensitive detail
-        print(f"FAILED: {type(exc).__name__}")
+        print(f"FAILED: {safe_error_text(exc)}")
         return 1
     return 0
 
