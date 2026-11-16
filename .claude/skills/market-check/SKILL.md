@@ -1,11 +1,21 @@
 ---
 name: market-check
-description: Use when the user says "market check", "check the markets", "any trades?", or reports a sudden drop or spike in a market and asks whether there is a trade. Scans the whole default list (stock indices, US shares, metals, energy and currencies) with the read-only IG briefing, including IG client sentiment, the calendar, news by market and earnings; gives a closer read on anything the user names, and can trade ANY market IG offers, not just the list. Records shadow ideas with honest win probabilities and 1/8 Kelly sizing for the £45 play-money challenge, picks at most one live candidate, manages every open position (cuts losers early, tightens stops, takes profit, reverses when the evidence flips) and places orders itself under the user's standing authorisation when every guardrail passes; otherwise stops and asks.
+description: Use when the user says "market check", "health check", "check the markets", "any trades?", or reports a sudden drop or spike in a market and asks whether there is a trade. Scans the whole default list (stock indices, US shares, metals, energy and currencies) with the read-only IG briefing, including IG client sentiment, the calendar, news by market and earnings; gives a closer read on anything the user names, and can trade ANY market IG offers, not just the list. Records shadow ideas with honest win probabilities and 1/8 Kelly sizing for the £45 play-money challenge, picks at most one live candidate, manages every open position (cuts losers early, tightens stops, takes profit, reverses when the evidence flips) and places orders itself under the user's standing authorisation when every guardrail passes; otherwise stops and asks.
 ---
 
 # Market check (the £45 challenge)
 
 Read the section "The £45 play-money challenge" in CLAUDE.md first. Those rules decide everything below. Nothing here is a proven edge: say so, plainly, every time.
+
+## Two modes (user decision, 2026-11-16)
+- **"market check" (or "full check") is the FULL mode, and a bare "market check" always means full.** Everything below: step 0, then the full briefing, the US 500 and US Tech 100 quick reads, research, ideas, at most one live order. The user runs this 3 or 4 times a day.
+- **"health check" is the POSITIONS-ONLY mode, run in between.** Do this and nothing else:
+  1. `manage reconcile --execute`, `manage list`, `manage trail` (dry run first, then `--execute` if it proposes moves).
+  2. `python3 -m ig_swing.challenge movers`: the one-line scan of the biggest moves across the default markets (live quotes, no allowance). It flags any market 1.5 ATR or more on the day, or beyond its 20-day range.
+  3. For each open position, a `quick` read of that market and a look at its news, and test the thesis and invalidation recorded at entry.
+  4. Act within step 0's authority: tighten a stop, trail, move a take-profit, take profit, cut a loser, or **reverse** (the close, then a NEW idea with its own honest probability, placed through `ig_swing.place` with every guardrail; a reversal needs fresh evidence on that market, from the quick read and the news, never "to win it back").
+  5. **No new positions in a health check except a reversal.** If `movers` flags a market we do not hold, or anything looks like an opportunity, say so in one line and tell the user to run a full market check; do not trade it from here.
+  6. Journal it: `manage note` for each position and one for the movers scan, then the backup. Report briefly, with the usual plain-text explanation for any action.
 
 ## 0. Review open positions FIRST, before looking for anything new
 First run `python3 -m ig_swing.manage reconcile --execute` (it records in the journal any trade IG closed on its own, by stop or take-profit, since the last session; it changes the journal only and places nothing; if it reports a close it could not match, tell the user). Then run `python3 -m ig_swing.manage list` at the start of every check (it also logs a position check, so the best and worst excursion can be estimated later). Managing an open trade is risk management and comes before new ideas. For each position look at its P&L in R, its stop and take-profit, the thesis and invalidation recorded at entry, and what has changed since. Then act, unprompted, under the user's standing authorisation (2026-11-11). The user's point: you trade without emotion, so you are better placed to decide, and **cutting losers short is where most traders fail**.

@@ -572,3 +572,17 @@ def test_the_report_splits_results_by_correlated_market_confirmation():
     b = {"EUR/USD": bars([FLAT, (11000.0, 11250.0, 10995.0, 11200.0)])}
     text = ch.format_report(ch.measure([a, b2, old], lambda m: b[m]))
     assert "confirmation confirmed: n=1" in text and "confirmation unknown: n=2" in text
+
+
+def test_movers_flag_big_atr_moves_and_range_breaks_and_sort_by_atr():
+    quotes = {"Calm": (100.0, 0.2), "Big": (200.0, -3.0), "Broken": (50.0, 0.5), "NoBars": (10.0, 4.0)}
+    stats = {"Calm": (1.0, 95.0, 105.0), "Big": (1.5, 150.0, 210.0), "Broken": (1.0, 51.0, 60.0)}
+    rows = ch.movers_rows(quotes, stats)
+    assert [r["market"] for r in rows] == ["Big", "Broken", "Calm", "NoBars"]
+    big, broken, calm, nobars = rows
+    assert big["move_atr"] == pytest.approx(2.0) and big["flags"] == ["2.0 ATR move"]
+    assert broken["flags"] == ["below the 20-day low"]
+    assert calm["flags"] == [] and nobars["flags"] == [] and nobars["move_atr"] is None
+    text = ch.format_movers(rows)
+    assert "FLAGGED: Big, Broken" in text and "run a full market check" in text
+    assert "Nothing flagged" in ch.format_movers(ch.movers_rows({"Calm": (100.0, 0.2)}, {"Calm": (1.0, 95.0, 105.0)}))

@@ -889,10 +889,47 @@ def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.Da
     return rows, notes
 
 
+MOVER_ATR_FLAG = 1.5
+
+
+def movers_rows(quotes: dict[str, tuple[float, float | None]], stats: dict[str, tuple[float | None, float | None, float | None]]) -> list[dict[str, Any]]:
+    """quotes: name -> (price, day % change). stats: name -> (atr %, 20-day low, 20-day high) from stored complete bars, any may be None.
+    Returns rows sorted by the size of the day's move in ATRs (markets without an ATR sort last), each flagged when the move is
+    MOVER_ATR_FLAG ATRs or more, or the price is beyond its 20-day range."""
+    rows: list[dict[str, Any]] = []
+    for name, (price, pct) in quotes.items():
+        atr_pct, lo, hi = stats.get(name, (None, None, None))
+        move_atr = abs(pct) / atr_pct if (pct is not None and atr_pct) else None
+        beyond = None
+        if lo is not None and hi is not None:
+            beyond = "below the 20-day low" if price < lo else "above the 20-day high" if price > hi else None
+        flags = []
+        if move_atr is not None and move_atr >= MOVER_ATR_FLAG:
+            flags.append(f"{move_atr:.1f} ATR move")
+        if beyond:
+            flags.append(beyond)
+        rows.append({"market": name, "price": price, "pct": pct, "move_atr": move_atr, "beyond": beyond, "flags": flags})
+    rows.sort(key=lambda r: (r["move_atr"] is None, -(r["move_atr"] or 0.0), -abs(r["pct"] or 0.0)))
+    return rows
+
+
+def format_movers(rows: list[dict[str, Any]], limit: int = 12) -> str:
+    lines = ["Movers (live quotes against stored daily bars; read-only, no price allowance used):"]
+    for r in rows[:limit]:
+        pct = "n/a" if r["pct"] is None else f"{r['pct']:+.2f}%"
+        atr = "" if r["move_atr"] is None else f" ({r['move_atr']:.1f} ATR)"
+        lines.append(f"  {r['market']:<16} {r['price']:>10.1f} {pct:>8}{atr}" + (f"  <-- {', '.join(r['flags'])}" if r["flags"] else ""))
+    flagged = [r["market"] for r in rows if r["flags"]]
+    lines.append(("FLAGGED: " + ", ".join(flagged) + ". Do not trade these from a health check; run a full market check.") if flagged
+                 else "Nothing flagged (no market 1.5 ATR or more on the day, none beyond its 20-day range).")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ig_swing.challenge")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("brief")
+    sub.add_parser("movers", help="one-line scan of the biggest moves across the default markets, for a health check (live quotes only)")
     q = sub.add_parser("quick", help="a fast read on one market, for a sudden move")
     q.add_argument("--market", required=True, help="any IG market: a name from the briefing, an epic, or search words")
     sub.add_parser("report")
@@ -941,6 +978,28 @@ def main(argv: list[str] | None = None) -> int:
         from .ig_client import PriceCache
 
         client = IGClient(creds, base_url=base_url(env), allow_live=(env == "live"), cache=PriceCache(ttl_seconds=20 * 3600))
+        if args.cmd == "movers":
+            snaps_ = batch_snapshots(client, [v[0] for v in ALL_MARKETS.values()])
+            quotes_, stats_ = {}, {}
+            for name_, (epic_, _sid, _m) in ALL_MARKETS.items():
+                sn_ = snaps_.get(epic_)
+                if sn_ is None:
+                    continue
+                quotes_[name_] = ((sn_.bid + sn_.offer) / 2, sn_.pct_change)
+                if name_ in SHARES:
+                    continue
+                try:
+                    from .indicators import atr as _atr
+                    rows_ = [r for r in client._cache.load_bars(f"{epic_}_DAY")]
+                    if len(rows_) >= 20:
+                        bdf_ = pd.DataFrame(rows_)
+                        bdf_ = clean_daily(bdf_.assign(timestamp=pd.to_datetime(bdf_["timestamp"])).sort_values("timestamp").reset_index(drop=True), now)
+                        px_ = quotes_[name_][0]
+                        stats_[name_] = (float(_atr(bdf_, 14).iloc[-1]) / px_ * 100, float(bdf_["low"].tail(20).min()), float(bdf_["high"].tail(20).max()))
+                except Exception:
+                    pass
+            print(format_movers(movers_rows(quotes_, stats_)))
+            return 0
         if args.cmd == "find":
             equity = client.get_account(creds.account_id).equity
             hits = [h for h in client.search_markets(args.term) if h.expiry in ("DFB", "-")][:8]
