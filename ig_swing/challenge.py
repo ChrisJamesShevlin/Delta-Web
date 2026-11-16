@@ -892,10 +892,13 @@ def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.Da
 MOVER_ATR_FLAG = 1.5
 
 
-def movers_rows(quotes: dict[str, tuple[float, float | None]], stats: dict[str, tuple[float | None, float | None, float | None]]) -> list[dict[str, Any]]:
+def movers_rows(quotes: dict[str, tuple[float, float | None]], stats: dict[str, tuple[float | None, float | None, float | None]],
+                held: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """quotes: name -> (price, day % change). stats: name -> (atr %, 20-day low, 20-day high) from stored complete bars, any may be None.
     Returns rows sorted by the size of the day's move in ATRs (markets without an ATR sort last), each flagged when the move is
-    MOVER_ATR_FLAG ATRs or more, or the price is beyond its 20-day range."""
+    MOVER_ATR_FLAG ATRs or more, or the price is beyond its 20-day range. held: market name -> short text such as "SELL +0.2R" for
+    markets with an open position."""
+    held = held or {}
     rows: list[dict[str, Any]] = []
     for name, (price, pct) in quotes.items():
         atr_pct, lo, hi = stats.get(name, (None, None, None))
@@ -908,7 +911,7 @@ def movers_rows(quotes: dict[str, tuple[float, float | None]], stats: dict[str, 
             flags.append(f"{move_atr:.1f} ATR move")
         if beyond:
             flags.append(beyond)
-        rows.append({"market": name, "price": price, "pct": pct, "move_atr": move_atr, "beyond": beyond, "flags": flags})
+        rows.append({"market": name, "price": price, "pct": pct, "move_atr": move_atr, "beyond": beyond, "flags": flags, "held": held.get(name)})
     rows.sort(key=lambda r: (r["move_atr"] is None, -(r["move_atr"] or 0.0), -abs(r["pct"] or 0.0)))
     return rows
 
@@ -918,10 +921,16 @@ def format_movers(rows: list[dict[str, Any]], limit: int = 12) -> str:
     for r in rows[:limit]:
         pct = "n/a" if r["pct"] is None else f"{r['pct']:+.2f}%"
         atr = "" if r["move_atr"] is None else f" ({r['move_atr']:.1f} ATR)"
-        lines.append(f"  {r['market']:<16} {r['price']:>10.1f} {pct:>8}{atr}" + (f"  <-- {', '.join(r['flags'])}" if r["flags"] else ""))
-    flagged = [r["market"] for r in rows if r["flags"]]
-    lines.append(("FLAGGED: " + ", ".join(flagged) + ". Do not trade these from a health check; run a full market check.") if flagged
-                 else "Nothing flagged (no market 1.5 ATR or more on the day, none beyond its 20-day range).")
+        lines.append(f"  {r['market']:<16} {r['price']:>10.1f} {pct:>8}{atr}" + (f"  <-- {', '.join(r['flags'])}" if r["flags"] else "")
+                     + (f"  [HELD: {r['held']}]" if r.get("held") else ""))
+    held_flagged = [r["market"] for r in rows if r["flags"] and r.get("held")]
+    new_flagged = [r["market"] for r in rows if r["flags"] and not r.get("held")]
+    if held_flagged:
+        lines.append("FLAGGED, HELD: " + ", ".join(held_flagged) + ". Check each thesis and invalidation against the move.")
+    if new_flagged:
+        lines.append("FLAGGED, NOT HELD: " + ", ".join(new_flagged) + ". Do not trade these from a health check; run a full market check.")
+    if not held_flagged and not new_flagged:
+        lines.append("Nothing flagged (no market 1.5 ATR or more on the day, none beyond its 20-day range).")
     return "\n".join(lines)
 
 
@@ -998,7 +1007,17 @@ def main(argv: list[str] | None = None) -> int:
                         stats_[name_] = (float(_atr(bdf_, 14).iloc[-1]) / px_ * 100, float(bdf_["low"].tail(20).min()), float(bdf_["high"].tail(20).max()))
                 except Exception:
                     pass
-            print(format_movers(movers_rows(quotes_, stats_)))
+            from .manage import initial_risk_points, move_in_r
+            from .journal import Journal as _J
+            trades_ = {t["deal_id"]: t for t in _J().open_trades()}
+            held_: dict[str, str] = {}
+            by_epic_ = {v[0]: k for k, v in ALL_MARKETS.items()}
+            for p_ in client.get_positions():
+                nm_ = by_epic_.get(p_.epic)
+                if nm_:
+                    m_ = move_in_r(p_, initial_risk_points(p_, trades_.get(p_.deal_id)))
+                    held_[nm_] = f"{p_.direction} " + ("n/a" if m_ is None else f"{m_:+.2f}R")
+            print(format_movers(movers_rows(quotes_, stats_, held_)))
             return 0
         if args.cmd == "find":
             equity = client.get_account(creds.account_id).equity

@@ -584,5 +584,15 @@ def test_movers_flag_big_atr_moves_and_range_breaks_and_sort_by_atr():
     assert broken["flags"] == ["below the 20-day low"]
     assert calm["flags"] == [] and nobars["flags"] == [] and nobars["move_atr"] is None
     text = ch.format_movers(rows)
-    assert "FLAGGED: Big, Broken" in text and "run a full market check" in text
+    assert "FLAGGED, NOT HELD: Big, Broken" in text and "run a full market check" in text
     assert "Nothing flagged" in ch.format_movers(ch.movers_rows({"Calm": (100.0, 0.2)}, {"Calm": (1.0, 95.0, 105.0)}))
+
+
+def test_movers_mark_held_markets_and_separate_the_flag_advice():
+    quotes = {"Held": (100.0, -3.0), "Other": (50.0, 4.0)}
+    stats = {"Held": (1.0, 90.0, 110.0), "Other": (1.0, 40.0, 60.0)}
+    rows = ch.movers_rows(quotes, stats, {"Held": "SELL +0.20R"})
+    text = ch.format_movers(rows)
+    assert "[HELD: SELL +0.20R]" in text
+    assert "FLAGGED, HELD: Held" in text and "FLAGGED, NOT HELD: Other" in text
+    assert "run a full market check" in text.split("NOT HELD")[1]
