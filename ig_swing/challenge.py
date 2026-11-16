@@ -222,8 +222,8 @@ def score_idea(idea: dict, bars: pd.DataFrame) -> dict[str, Any] | None:
     return None
 
 
-def score_idea_trail(idea: dict, bars: pd.DataFrame, width_r: float = 1.0) -> dict[str, Any] | None:
-    """The same idea with a trailing stop instead of a fixed stop and target: fixed stop until up 1R, then trailing ``width_r`` x R behind the best price.
+def score_idea_trail(idea: dict, bars: pd.DataFrame, width_r: float = 1.0, trigger_r: float = 1.0) -> dict[str, Any] | None:
+    """The same idea with a trailing stop instead of a fixed stop and target: fixed stop until up ``trigger_r`` x R (1R unless stated), then trailing ``width_r`` x R behind the best price.
 
     No take-profit, so a winner can run until the trail is hit or the horizon ends. Daily bars: the stop for a bar is the one set by the
     PREVIOUS bars (the trail is updated with a bar's extreme only after it), gaps fill at the open, a stop inside a bar fills at the stop.
@@ -248,7 +248,7 @@ def score_idea_trail(idea: dict, bars: pd.DataFrame, width_r: float = 1.0) -> di
             if lo - half <= stop:
                 return _result(idea, stop, reason)
             best = max(best, h - half)
-            trailing = trailing or best - entry >= r
+            trailing = trailing or best - entry >= trigger_r * r
             if trailing:
                 stop = max(stop, best - d)
         else:
@@ -257,7 +257,7 @@ def score_idea_trail(idea: dict, bars: pd.DataFrame, width_r: float = 1.0) -> di
             if h + half >= stop:
                 return _result(idea, stop, reason)
             best = min(best, lo + half)
-            trailing = trailing or entry - best >= r
+            trailing = trailing or entry - best >= trigger_r * r
             if trailing:
                 stop = min(stop, best + d)
         if j == horizon - 1:
@@ -385,6 +385,10 @@ def format_review(m: dict[str, Any], base_finished: list[tuple[dict, dict]], bas
 
 
 TRAIL_WIDTHS = (1.0, 1.5, 2.0)
+# Added 2026-11-16 (user question: is +1R too late to start trailing?). Recording only, nothing live changes: the same trail at 1R behind the best
+# price, but starting once the trade is up 0.5R or 0.75R instead of 1R. Keys in each idea's trail dict.
+EARLY_TRIGGERS = (0.5, 0.75)
+EARLY_KEYS = {t: f"early_{t:g}" for t in EARLY_TRIGGERS}
 
 
 def measure(ideas: list[dict], get_bars: Callable[[str], pd.DataFrame]) -> dict[str, Any]:
@@ -397,6 +401,7 @@ def measure(ideas: list[dict], get_bars: Callable[[str], pd.DataFrame]) -> dict[
         else:
             finished.append((idea, res))
         trails = {w: score_idea_trail(idea, bars, w) for w in TRAIL_WIDTHS}
+        trails.update({EARLY_KEYS[t]: score_idea_trail(idea, bars, 1.0, t) for t in EARLY_TRIGGERS})
         if res is not None and all(t is not None for t in trails.values()):
             pairs.append((idea, res, trails))
     return {"finished": finished, "pending": pending, "total": len(ideas), "calibration": calibration(finished), "pairs": pairs}
@@ -428,6 +433,10 @@ def format_report(m: dict[str, Any]) -> str:
         lines.append(f"Exit style comparison (the same ideas, n={len(pairs)}): fixed stop and target mean {fx:+.2f}R; trailing stop from +1R, "
                      + ", ".join(f"{w:g}R behind the best price {tr[w]:+.2f}R" for w in TRAIL_WIDTHS)
                      + ("  (under 30: noise; three trail widths were tried, so small gaps are noise)" if len(pairs) < 30 else "  (three trail widths were tried, so small gaps are noise)"))
+        early = {t: mean_se([tr_[EARLY_KEYS[t]]["r"] for _, _, tr_ in pairs if EARLY_KEYS[t] in tr_])[0] for t in EARLY_TRIGGERS}
+        lines.append("  Earlier trail start (1R behind the best price, begins once up the stated amount; from 2026-11-16): "
+                     + ", ".join(f"from +{t:g}R {early[t]:+.2f}R" for t in EARLY_TRIGGERS)
+                     + f"  (five trail variants tried in all, so small gaps are noise" + ("; under 30: noise)" if len(pairs) < 30 else ")"))
     cal = m["calibration"]
     lines.append("Probability check (does the stated chance of winning match what happened?)")
     if cal["n"]:

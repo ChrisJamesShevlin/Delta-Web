@@ -374,6 +374,26 @@ def test_wider_trails_hold_on_longer_and_give_back_more_or_less_by_hand():
     assert ch.TRAIL_WIDTHS == (1.0, 1.5, 2.0)
 
 
+def test_an_earlier_trail_start_protects_a_trade_that_only_reaches_half_an_r():
+    i = idea(horizon_days=3)
+    b = bars([(11000.0, 11060.0, 10995.0, 11050.0), (11050.0, 11055.0, 10950.0, 10960.0), (10960.0, 10965.0, 10955.0, 10962.0)])
+    late = ch.score_idea_trail(i, b)                       # starts at +1R, never reached: the original stop is never touched, closes on the time exit
+    early = ch.score_idea_trail(i, b, 1.0, 0.5)            # starts at +0.5R: best 11059, stop 1R behind, hit on the way back
+    assert late["reason"] == "time"
+    assert early["reason"] == "trail_stop" and early["exit"] == pytest.approx(10959.0) and early["r"] > late["r"] - 0.1
+    assert ch.EARLY_TRIGGERS == (0.5, 0.75)
+
+
+def test_measure_scores_the_early_variants_alongside_the_widths():
+    i = idea(horizon_days=1)
+    i["epic"] = "E"
+    b = bars([(11000.0, 11060.0, 10995.0, 11050.0)])
+    m = ch.measure([i], lambda _e: b)
+    trails = m["pairs"][0][2]
+    assert set(trails) == {1.0, 1.5, 2.0, "early_0.5", "early_0.75"}
+    assert "Earlier trail start" in ch.format_report(m)
+
+
 # ---- the learning loop: archive, baseline, conditions, review --------------
 
 
