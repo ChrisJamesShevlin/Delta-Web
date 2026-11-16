@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
@@ -281,6 +281,39 @@ def test_measure_skips_ideas_it_cannot_price_and_says_so():
     m = ch.measure([idea()], short)
     assert m["unscored"] == 1 and m["finished"] == [] and m["pending"] == 0
     assert "could not be scored this run" in ch.format_report(m)
+
+
+def test_news_time_parses_hhmm_and_iso_and_refuses_the_future():
+    now = datetime(2026, 11, 16, 10, 30, tzinfo=timezone.utc)
+    assert ch.parse_news_time("09:45", now) == datetime(2026, 11, 16, 9, 45, tzinfo=timezone.utc)
+    assert ch.parse_news_time("23:50", now) == datetime(2026, 11, 15, 23, 50, tzinfo=timezone.utc)      # a later clock time means yesterday, never the future
+    assert ch.parse_news_time("2026-11-16T08:00:00+00:00", now) == datetime(2026, 11, 16, 8, 0, tzinfo=timezone.utc)
+    with pytest.raises(ch.InvalidIdea):
+        ch.parse_news_time("soon", now)
+    with pytest.raises(ch.InvalidIdea):
+        ch.parse_news_time("2026-11-16T12:00:00+00:00", now)
+
+
+def test_news_features_record_lateness_and_the_move_since_the_news():
+    now = datetime(2026, 11, 16, 10, 30, tzinfo=timezone.utc)
+    f = ch.news_features("Fed's Collins backs more tightening", now - timedelta(minutes=45), now, 11000.0, 11055.0)
+    assert f["minutes_late"] == 45.0 and f["move_since_news_pct"] == pytest.approx(-0.4975, abs=1e-3) and f["price_at_news"] == 11055.0
+    assert "move_since_news_pct" not in ch.news_features("x", now - timedelta(minutes=5), now, 11000.0)
+    with pytest.raises(ch.InvalidIdea):
+        ch.news_features("", now, now, 1.0)
+    with pytest.raises(ch.InvalidIdea):
+        ch.news_features("x" * 201, now, now, 1.0)
+
+
+def test_news_buckets_and_the_report_split_by_how_late_the_news_was():
+    assert ch.news_bucket(None) == "no news cited" and ch.news_bucket({"news": {"minutes_late": 10}}) == "news under 30 min old"
+    assert ch.news_bucket({"news": {"minutes_late": 30}}) == "news 30 min to 2 hours old"
+    assert ch.news_bucket({"news": {"minutes_late": 121}}) == "news over 2 hours old"
+    i = idea()
+    i["features"] = {"news": {"minutes_late": 12.0}}
+    r = ch.score_idea(i, bars([(11000.0, 11300.0, 10995.0, 11250.0)] * 5))
+    text = ch.format_report({"finished": [(i, r)] if r else [], "pending": 0, "total": 1, "calibration": ch.calibration([]), "pairs": []})
+    assert r is None or "news timing news under 30 min old: n=1" in text
 
 
 class SearchClient:

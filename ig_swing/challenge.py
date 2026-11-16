@@ -133,6 +133,53 @@ class InvalidIdea(ValueError):
     """The idea does not match the rules."""
 
 
+MAX_NEWS_HEADLINE = 200
+
+
+def parse_news_time(text: str, now: datetime) -> datetime:
+    """When the headline was published: ``HH:MM`` (UTC, today, or yesterday if that would be in the future) or a full ISO time. Never in the future."""
+    text = text.strip()
+    try:
+        if re.fullmatch(r"\d{1,2}:\d{2}", text):
+            h, m = (int(x) for x in text.split(":"))
+            t = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if t > now:
+                t -= timedelta(days=1)
+        else:
+            t = datetime.fromisoformat(text)
+            t = t.replace(tzinfo=timezone.utc) if t.tzinfo is None else t.astimezone(timezone.utc)
+    except ValueError:
+        raise InvalidIdea("the news time must be HH:MM (UTC) or an ISO date and time") from None
+    if t > now + timedelta(minutes=1):
+        raise InvalidIdea("the news time is in the future")
+    return t
+
+
+def news_features(headline: str, published: datetime, now: datetime, price_now: float, price_at_news: float | None = None) -> dict[str, Any]:
+    """What news drove the idea and how late it was read. ``price_at_news`` is optional (the price when the headline broke, if known)."""
+    headline = headline.strip()
+    if not headline or len(headline) > MAX_NEWS_HEADLINE:
+        raise InvalidIdea(f"the news headline must be 1 to {MAX_NEWS_HEADLINE} characters")
+    out: dict[str, Any] = {"headline": headline, "published": published.isoformat(), "minutes_late": round((now - published).total_seconds() / 60, 1)}
+    if price_at_news is not None:
+        if price_at_news <= 0:
+            raise InvalidIdea("the price at the news time must be above zero")
+        out["price_at_news"] = float(price_at_news)
+        out["move_since_news_pct"] = round((price_now / price_at_news - 1) * 100, 3)
+    return out
+
+
+def news_bucket(features: dict[str, Any] | None) -> str:
+    """How late the news was when the idea was written. Fixed buckets: under 30 minutes, 30 minutes to 2 hours, over 2 hours, or no news cited."""
+    n = (features or {}).get("news")
+    if not n:
+        return "no news cited"
+    late = n.get("minutes_late")
+    if late is None:
+        return "no news cited"
+    return "news under 30 min old" if late < 30 else ("news 30 min to 2 hours old" if late <= 120 else "news over 2 hours old")
+
+
 def make_idea(idea_id: int, now: datetime, market: str, direction: str, entry: float, spread_pts: float, stop_pts: float, target_pts: float,
               p_win: float, playbook: str, confidence: str, thesis: str, horizon_days: int = 5, live: bool = False,
               research: str = "headlines", sources: list[str] | None = None, epic: str | None = None, features: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -422,10 +469,10 @@ def format_report(m: dict[str, Any]) -> str:
         lines.append(f"  NOTE: {m['unscored']} idea(s) could not be scored this run because IG's weekly price allowance is short (nothing is scored on other data); run again after it resets")
     if fin:
         lines.append(f"  all: mean {mean:+.2f}R, SE {('n/a' if se != se else f'{se:.2f}')}, win rate {pct(sum(1 for r in rs if r > 0) / len(rs))}")
-        for label, key in (("playbook", "playbook"), ("confidence", "confidence"), ("research", "research"), ("confirmation", "confirmation")):
+        for label, key in (("playbook", "playbook"), ("confidence", "confidence"), ("research", "research"), ("confirmation", "confirmation"), ("news timing", "news")):
             groups: dict[str, list[float]] = {}
             for i, r in fin:
-                val = ((i.get("features") or {}).get("confirm") or {}).get("label", "unknown") if key == "confirmation" else i.get(key, "headlines")
+                val = ((i.get("features") or {}).get("confirm") or {}).get("label", "unknown") if key == "confirmation" else (news_bucket(i.get("features")) if key == "news" else i.get(key, "headlines"))
                 groups.setdefault(val, []).append(r["r"])
             for g, xs in sorted(groups.items()):
                 gm, _ = mean_se(xs)
@@ -868,6 +915,9 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--live", action="store_true", help="mark that this idea was taken live")
     i.add_argument("--research", choices=RESEARCH_LEVELS, default="headlines", help="none, the briefing headlines only, or a web research pass")
     i.add_argument("--source", action="append", default=[], help="a source you relied on (a URL or a title), repeatable")
+    i.add_argument("--news-headline", default=None, help="the headline that drove this idea, if one did (at most 200 characters); records how late the news was")
+    i.add_argument("--news-time", default=None, help="when that headline was published: HH:MM in UTC, or an ISO time (required with --news-headline)")
+    i.add_argument("--news-price", type=float, default=None, help="the market's price when the headline broke, if known (optional)")
     args = ap.parse_args(argv)
 
     from .bars import clean_daily
@@ -950,6 +1000,10 @@ def main(argv: list[str] | None = None) -> int:
             features = idea_features(info, atr_pts, range_pos, long_pct, evs_, now)
             features["tech"] = tech_
             features["bar_source"] = bar_source
+            if args.news_headline or args.news_time or args.news_price is not None:
+                if not (args.news_headline and args.news_time):
+                    raise InvalidIdea("--news-headline and --news-time go together")
+                features["news"] = news_features(args.news_headline, parse_news_time(args.news_time, now), now, (info["bid"] + info["offer"]) / 2, args.news_price)
             from .themes import confirmation, describe_confirmation, exposure, overlaps
             conf_ = confirmation(info["name"], direction, journal.latest_snapshots((now - timedelta(hours=36)).isoformat()))
             open_ = [(t["market"], t["direction"]) for t in journal.open_trades() if t.get("market")]
@@ -965,6 +1019,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  full Kelly {ks * 100:.1f}% of the bankroll, 1/8 Kelly {100 * KELLY_FRACTION * ks:.1f}%; suggested risk {suggested_risk_pct(args.p_win, rr):.1f}% (cap {CAP_UNTIL_CALIBRATED:.0f}% until calibrated)"
                   + ("" if ks > 0 else "  -> Kelly says do not trade this"))
             print("  Confirmation by correlated markets: " + describe_confirmation(conf_))
+            nf = features.get("news")
+            if nf:
+                mv = f", price {nf['move_since_news_pct']:+.2f}% since the news" if "move_since_news_pct" in nf else ""
+                print(f"  News cited: {nf['headline']} ({nf['minutes_late']:.0f} minutes old when written{mv})")
             for o_ in features["overlap"]:
                 print(f"  Overlap: {o_} (a warning only; treat it as one bet)")
             return 0
