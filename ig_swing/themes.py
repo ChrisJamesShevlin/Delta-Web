@@ -134,3 +134,85 @@ def describe_confirmation(c: dict[str, Any] | None) -> str:
     if c["disagree"]:
         text += f"; against: {', '.join(c['disagree'])}"
     return text
+
+
+# ---- the book as a whole (2026-11-17): information only, nothing here blocks an order ----
+
+METAL_THEMES = ("precious metals",)
+
+
+def stop_risk_gbp(pos: Any) -> float:
+    """What the position would lose if its stop is hit now. Zero when the stop is at breakeven or locks in a profit, or there is no stop."""
+    if getattr(pos, "stop_level", None) is None:
+        return 0.0
+    lost = (pos.open_level - pos.stop_level) if pos.direction == "BUY" else (pos.stop_level - pos.open_level)
+    return max(0.0, lost * pos.size)
+
+
+def rows_from_positions(positions: list[Any]) -> list[dict[str, Any]]:
+    return [{"market": canonical(p.instrument_name), "direction": p.direction, "risk_gbp": stop_risk_gbp(p)} for p in positions]
+
+
+def _dollar_link(exp: dict[str, int]) -> int:
+    """Assumed, not measured: the dollar-and-yields group. Long USD counts +1; precious metals move against the dollar, so a long metal counts -1."""
+    return exp.get("USD", 0) + sum(-exp[t] for t in METAL_THEMES if t in exp)
+
+
+def _word(theme: str, sign: int) -> str:
+    return f"{'long' if sign > 0 else 'short'} {theme}"
+
+
+def _same_sign_groups(rows: list[dict[str, Any]]) -> dict[tuple[str, int], list[dict[str, Any]]]:
+    groups: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for r in rows:
+        for t, sg in exposure(r["market"], r["direction"]).items():
+            if t in ("equities",):
+                continue
+            groups.setdefault((t, sg), []).append(r)
+    link: dict[int, list[dict[str, Any]]] = {}
+    for r in rows:
+        v = _dollar_link(exposure(r["market"], r["direction"]))
+        if v:
+            link.setdefault(1 if v > 0 else -1, []).append(r)
+    for sg, members in link.items():
+        groups[("dollar-and-yields group (assumed link)", sg)] = members
+    return groups
+
+
+def book_view(rows: list[dict[str, Any]], equity: float) -> list[str]:
+    """The open book grouped by driver: for each driver held by two or more positions the same way, the positions, the combined stop risk, and what
+    happens if they all move against us together. Single-position drivers are not listed."""
+    groups = {k: v for k, v in _same_sign_groups(rows).items() if len(v) >= 2}
+    total = sum(r["risk_gbp"] for r in rows)
+    lines = [f"Book view: {len(rows)} positions, stop risk £{total:.2f} ({(100 * total / equity) if equity else 0:.0f}% of equity if every stop is hit)."]
+    if not groups:
+        lines.append("  No driver is held by two or more positions the same way.")
+        return lines
+    for (theme, sg), members in sorted(groups.items(), key=lambda kv: -sum(m["risk_gbp"] for m in kv[1])):
+        risk = sum(m["risk_gbp"] for m in members)
+        names = ", ".join(f"{m['direction'].lower()} {m['market']}" for m in members)
+        label = theme if theme.startswith("dollar") else _word(theme, sg)
+        if theme.startswith("dollar"):
+            label += ", net " + ("long dollar" if sg > 0 else "short dollar")
+        lines.append(f"  {label}: {len(members)} positions ({names}); stop risk £{risk:.2f} ({(100 * risk / equity) if equity else 0:.0f}% of equity), one bet if they all turn together")
+    return lines
+
+
+def pre_trade_exposure(market: str, direction: str, new_risk_gbp: float, rows: list[dict[str, Any]], equity: float) -> list[str]:
+    """Drivers the new trade would stack on: for each driver it shares the same way with open positions, the count and the combined stop risk with it added."""
+    mine = exposure(market, direction)
+    if not mine:
+        return []
+    new_row = {"market": canonical(market), "direction": direction.upper(), "risk_gbp": new_risk_gbp}
+    before = _same_sign_groups(rows)
+    after = _same_sign_groups(rows + [new_row])
+    lines = []
+    for key, members in after.items():
+        if new_row not in members or key not in before:
+            continue
+        theme, sg = key
+        risk = sum(m["risk_gbp"] for m in members)
+        names = ", ".join(f"{m['direction'].lower()} {m['market']}" for m in members if m is not new_row)
+        label = f"{theme}, net {'long' if sg > 0 else 'short'} dollar" if theme.startswith("dollar") else _word(theme, sg)
+        lines.append(f"driver check: {label} would be position {len(members)} of the same bet (with {names}); combined stop risk £{risk:.2f} ({(100 * risk / equity) if equity else 0:.0f}% of equity)")
+    return lines

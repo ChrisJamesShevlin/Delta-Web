@@ -259,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ig_swing.manage", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
+    sub.add_parser("book", help="the open book grouped by driver: stacked bets and their combined stop risk (information only)")
     sub.add_parser("history")
     t = sub.add_parser("trail")
     t.add_argument("--execute", action="store_true")
@@ -316,6 +317,10 @@ def main(argv: list[str] | None = None) -> int:
         engine = RiskEngine(risk_limits(env), KillSwitch())
         positions = client.get_positions()
         open_trades = {t["deal_id"]: t for t in journal.open_trades()}
+        if args.cmd == "book":
+            from .themes import book_view, rows_from_positions
+            print("\n".join(book_view(rows_from_positions(positions), client.get_account(creds.account_id).equity)))
+            return 0
         if args.cmd == "list":
             if not positions:
                 print("No open positions.")

@@ -596,3 +596,34 @@ def test_movers_mark_held_markets_and_separate_the_flag_advice():
     assert "[HELD: SELL +0.20R]" in text
     assert "FLAGGED, HELD: Held" in text and "FLAGGED, NOT HELD: Other" in text
     assert "run a full market check" in text.split("NOT HELD")[1]
+
+
+def test_book_view_groups_stacked_bets_and_counts_the_assumed_dollar_link():
+    from ig_swing import themes
+    rows = [{"market": "AUD/USD", "direction": "SELL", "risk_gbp": 0.0}, {"market": "EUR/USD", "direction": "SELL", "risk_gbp": 0.93},
+            {"market": "Silver", "direction": "SELL", "risk_gbp": 2.78}, {"market": "Gold", "direction": "SELL", "risk_gbp": 1.10},
+            {"market": "France 40", "direction": "BUY", "risk_gbp": 1.60}]
+    text = "\n".join(themes.book_view(rows, 50.0))
+    assert "5 positions, stop risk £6.41 (13% of equity" in text
+    assert "dollar-and-yields group (assumed link), net long dollar: 4 positions" in text and "stop risk £4.81" in text
+    assert "short precious metals: 2 positions" in text and "long USD: 2 positions" in text
+    assert "France 40" not in text.split("dollar-and-yields")[1]                       # a lone equity bet is not listed
+    assert "No driver is held by two or more" in "\n".join(themes.book_view(rows[-1:], 50.0))
+
+
+def test_pre_trade_exposure_names_the_stack_and_stays_quiet_for_an_independent_trade():
+    from ig_swing import themes
+    rows = [{"market": "EUR/USD", "direction": "SELL", "risk_gbp": 0.93}, {"market": "Gold", "direction": "SELL", "risk_gbp": 1.10}]
+    lines = themes.pre_trade_exposure("AUD/USD", "SELL", 0.70, rows, 50.0)
+    assert any("long USD would be position 2" in x and "£1.63" in x for x in lines)
+    assert any("dollar-and-yields group" in x and "position 3" in x and "£2.73" in x for x in lines)
+    assert themes.pre_trade_exposure("Crude oil", "BUY", 1.0, rows, 50.0) == []
+
+
+def test_stop_risk_is_zero_once_the_stop_is_at_breakeven():
+    from types import SimpleNamespace
+    from ig_swing import themes
+    sell = SimpleNamespace(direction="SELL", open_level=100.0, stop_level=100.0, size=0.01)
+    buy = SimpleNamespace(direction="BUY", open_level=100.0, stop_level=90.0, size=0.5)
+    assert themes.stop_risk_gbp(sell) == 0.0 and themes.stop_risk_gbp(buy) == pytest.approx(5.0)
+    assert themes.stop_risk_gbp(SimpleNamespace(direction="BUY", open_level=100.0, stop_level=None, size=1.0)) == 0.0

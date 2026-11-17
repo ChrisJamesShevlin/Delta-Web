@@ -65,7 +65,9 @@ def plan_order(client: Any, journal: Any, engine: RiskEngine, market: str, direc
     stake = decision.size
     from .themes import overlaps
     overlap = overlaps(market, direction, [(t["market"], t["direction"]) for t in journal.open_trades() if t.get("market")])
-    return {"overlap": overlap, 
+    from .themes import pre_trade_exposure, rows_from_positions
+    exposure_lines = pre_trade_exposure(market, direction, decision.risk_gbp, rows_from_positions(positions), account.equity)
+    return {"overlap": overlap, "exposure": exposure_lines, 
         "market": market, "epic": epic, "direction": direction.upper(), "stop": stop, "target": target, "reward_risk": rr, "p_win": p_win,
         "kelly": kelly, "kelly_eighth_pct": 100 * KELLY_FRACTION * kelly, "risk_pct_target": risk_pct, "calibrated": calibrated,
         "decision": decision, "reasons": reasons, "allowed": decision.allowed and not (risk_pct <= 0 and not ignore_kelly),
@@ -85,6 +87,7 @@ def describe(plan: dict[str, Any], equity: float) -> str:
     ]
     lines += [f"  note: {n}" for n in d.notes]
     lines += [f"  overlap: {o} (a warning only, not a block)" for o in plan.get("overlap", [])]
+    lines += [f"  {x} (information only, not a block)" for x in plan.get("exposure", [])]
     if plan["reasons"]:
         lines.append("  REFUSED: " + "; ".join(plan["reasons"]))
     return "\n".join(lines)
