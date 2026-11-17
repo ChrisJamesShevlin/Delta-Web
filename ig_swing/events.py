@@ -101,6 +101,7 @@ class Event:
     time_utc: datetime | None = None  # None means the source gives a date only
     forecast: str | None = None       # consensus, only from the world calendar feed
     previous: str | None = None
+    actual: str | None = None         # the released figure, only from the primary world calendar source
 
 
 def _normalise(name: str) -> str:
@@ -234,7 +235,7 @@ def central_bank_events(start: date, end: date) -> list[Event]:
 
 
 # ---- world calendar feed (added 2026-11-17) -----------------------------
-# A free weekly JSON feed (this week; next week once it is published) with release times, an impact rating, the consensus forecast and the
+# The primary source is a free keyless JSON API (biquote, which mirrors MQL5's calendar) with actual figures; the backup is a free weekly JSON feed (this week; next week once it is published) with release times, an impact rating, the consensus forecast and the
 # previous value for the currencies we trade. It is an unofficial feed (it mirrors a widely used retail calendar), so it can change or
 # disappear and its numbers are not a primary source: check a high-impact number against the official release. Used by the challenge only.
 WORLD_FEED_URLS = ("https://nfs.faireconomy.media/ff_calendar_thisweek.json", "https://nfs.faireconomy.media/ff_calendar_nextweek.json")
@@ -264,8 +265,58 @@ def parse_world_rows(rows: list[dict]) -> tuple[list[Event], tuple[date, date] |
     return out, ((min(days), max(days)) if days else None)
 
 
-def fetch_world(session: Any, start: date, end: date) -> tuple[list[Event], tuple[date, date] | None]:
-    """This week's feed must load; next week's is tried and quietly skipped when it is not published yet."""
+BIQUOTE_URL = "https://biquote.io/api/calendar"
+BIQUOTE_COUNTRIES = "US,GB,EU,DE,FR,AU,JP,CA,NZ,CH,CN"
+_UNIT_SUFFIX = {"thousands": "K", "millions": "M", "billions": "B", "trillions": "T"}
+
+
+def _fmt_value(v: Any, unit: Any, multiplier: Any) -> str | None:
+    if v is None:
+        return None
+    try:
+        num = f"{float(v):g}"
+    except (TypeError, ValueError):
+        return None
+    if str(unit or "").lower() == "percent":
+        return num + "%"
+    return num + _UNIT_SUFFIX.get(str(multiplier or "").lower(), "")
+
+
+def parse_biquote_rows(rows: list[dict]) -> tuple[list[Event], tuple[date, date] | None]:
+    """Medium and high importance rows for the currencies we trade, with the released actual when there is one. Rows whose time is not exact
+    count for their whole day (no time). Returns the events and the span of days covered by all rows, or None if empty."""
+    out: list[Event] = []
+    days: list[date] = []
+    for r in rows:
+        try:
+            when = datetime.fromisoformat(str(r["time"]).replace("Z", "+00:00")).astimezone(UTC)
+        except (KeyError, ValueError):
+            continue
+        days.append(when.date())
+        tier = _IMPACT_TIER.get(str(r.get("importance", "")).strip().lower())
+        cur = str(r.get("currency", "")).strip().upper()
+        name = re.sub(r"\s+", " ", str(r.get("name", "")).strip())
+        if tier is None or cur not in WORLD_CURRENCIES or not name:
+            continue
+        unit, mult = r.get("unit"), r.get("multiplier")
+        out.append(Event(when.date(), f"{name} ({cur})", tier, "world calendar (biquote)", when if str(r.get("timeMode", "exact")) == "exact" else None,
+                         _fmt_value(r.get("forecast"), unit, mult), _fmt_value(r.get("previous"), unit, mult), _fmt_value(r.get("actual"), unit, mult)))
+    return out, ((min(days), max(days)) if days else None)
+
+
+def _fetch_biquote(session: Any, start: date, end: date) -> tuple[list[Event], tuple[date, date] | None]:
+    resp = session.get(BIQUOTE_URL, params={"from": start.isoformat(), "to": end.isoformat(), "countries": BIQUOTE_COUNTRIES},
+                       headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT_SECONDS)
+    if resp.status_code != 200:
+        raise SourceError(f"HTTP {resp.status_code}")
+    evs, span = parse_biquote_rows(resp.json())
+    if span is None:
+        raise SourceError("no rows")
+    return evs, (start, end)
+
+
+def _fetch_faireconomy(session: Any, start: date, end: date) -> tuple[list[Event], tuple[date, date] | None]:
+    """This week's feed must load; next week's is tried and quietly skipped when it is not published yet. No actual figures."""
     events: list[Event] = []
     spans: list[tuple[date, date]] = []
     for i, url in enumerate(WORLD_FEED_URLS):
@@ -284,6 +335,30 @@ def fetch_world(session: Any, start: date, end: date) -> tuple[list[Event], tupl
     if not spans:
         raise SourceError("no rows")
     return [e for e in events if start <= e.day <= end], (min(a for a, _ in spans), max(b for _, b in spans))
+
+
+def fetch_world(session: Any, start: date, end: date) -> tuple[list[Event], tuple[date, date] | None, str | None]:
+    """The primary source (has actual figures) first; the backup feed (forecasts only) if it fails. Returns events, coverage and a note or None."""
+    try:
+        evs, span = _fetch_biquote(session, start, end)
+        return evs, span, None
+    except Exception as exc:
+        why = str(exc) if isinstance(exc, SourceError) else type(exc).__name__
+    evs, span = _fetch_faireconomy(session, start, end)
+    return evs, span, f"world calendar: primary source unavailable ({why}); using the backup feed, which has forecasts but no actual figures"
+
+
+def split_released(events: list[Event], now_utc: datetime, hours: float = 24.0) -> tuple[list[Event], list[Event]]:
+    """(upcoming, released). Released means a timed event whose time has passed, kept only if it was within the last ``hours``."""
+    upcoming: list[Event] = []
+    released: list[Event] = []
+    for e in events:
+        if e.time_utc is not None and e.time_utc <= now_utc:
+            if now_utc - e.time_utc <= timedelta(hours=hours):
+                released.append(e)
+        else:
+            upcoming.append(e)
+    return upcoming, released
 
 
 def merge_events(*lists: list[Event]) -> list[Event]:
@@ -321,7 +396,9 @@ def load_events(session: Any, start: date, end: date, fred_key: str | None, worl
     coverage: tuple[date, date] | None = None
     if world:
         try:
-            world_events, coverage = fetch_world(session, start, end)
+            world_events, coverage, world_note = fetch_world(session, start, end)
+            if world_note:
+                notes.append(world_note)
         except SourceError as exc:
             notes.append(f"world calendar: unavailable ({exc}); euro-area, UK and Australian releases are missing")
         except Exception as exc:

@@ -544,7 +544,7 @@ def stake_hint(equity: float, risk_pct: float, stop_pts: float, price: float, ma
 
 def format_briefing(now: datetime, rows: list[dict], equity: float, positions: int, notes: list[str], events_text: list[str], headlines_text: list[str],
                     market_news: list[str] | None = None, earnings_text: list[str] | None = None,
-                    macro_text: list[str] | None = None) -> str:
+                    macro_text: list[str] | None = None, released_text: list[str] | None = None) -> str:
     lines = [f"Challenge briefing, {now:%a %d %b %Y %H:%M} UTC. Equity £{equity:.2f}, open positions {positions}", ""]
     header = f"{'market':16} {'price':>9} {'day':>7} {'ATR pts':>8} {'ATR %':>6} {'20d range':>9} {'IG clients':>11} {'spread':>7}  stake for a 1.5 ATR stop at {BRIEFING_RISK_PCT:g}% risk"
     for cls in CLASS_ORDER:
@@ -572,6 +572,8 @@ def format_briefing(now: datetime, rows: list[dict], equity: float, positions: i
     if macro_text:
         lines += ["", "Macro backdrop (Yahoo, same day; context for currencies, gold and indices, no rule attached):"] + macro_text
     lines += ["", "Events, next 48 hours:"] + (events_text or ["  none found"])
+    if released_text is not None:
+        lines += ["", "Released in the last 24 hours (ACTUAL against forecast where the calendar has the figure; otherwise a headline with the number, or search for it):"] + (released_text or ["  none"])
     if earnings_text is not None:
         lines += ["", "Earnings in the next 3 days (shares on the list):"] + (earnings_text or ["  none found"])
     lines += ["", "Headlines (macro and general):"] + (headlines_text or ["  none found"])
@@ -646,9 +648,76 @@ def format_events(events: list, limit: int = 16) -> list[str]:
         if e.tier not in (HIGH, MEDIUM):
             continue
         when = f"{e.time_utc:%a %d %b %H:%M}Z" if getattr(e, "time_utc", None) else f"{e.day:%a %d %b} (time n/a)"
-        nums = ", ".join(x for x in (f"forecast {e.forecast}" if getattr(e, "forecast", None) else "", f"previous {e.previous}" if getattr(e, "previous", None) else "") if x)
+        nums = ", ".join(x for x in (f"actual {e.actual}" if getattr(e, "actual", None) else "", f"forecast {e.forecast}" if getattr(e, "forecast", None) else "",
+                                     f"previous {e.previous}" if getattr(e, "previous", None) else "") if x)
         out.append(f"  {when}  {e.label} [{e.tier.upper()}]" + (f"  ({nums})" if nums else ""))
     return out[:limit]
+
+
+_TITLE_NOISE = {"m/m", "y/y", "q/q", "3m/y", "index", "prelim", "final", "flash", "revised", "s.a.", "n.s.a."}
+_RELEASE_SYNONYMS = {"cpi": ("cpi", "inflation", "consumer prices"), "ppi": ("ppi", "producer prices"), "employment": ("employment", "jobs", "payrolls"),
+                     "unemployment": ("unemployment", "jobless"), "earnings": ("earnings", "wages", "wage growth"), "wage": ("wage", "wages", "pay"),
+                     "gdp": ("gdp", "economy grew", "economy shrank"), "pmi": ("pmi",), "claims": ("claims", "jobless")}
+
+
+_COUNTRY_WORDS = {"CAD": ("canada", "canadian", "boc"), "GBP": ("uk", "britain", "british", "sterling", "boe", "bank of england"),
+                  "EUR": ("euro", "eurozone", "euro zone", "german", "germany", "france", "ecb", "zew"), "AUD": ("australia", "australian", "aussie", "rba"),
+                  "NZD": ("new zealand", "nz", "kiwi", "rbnz"), "JPY": ("japan", "japanese", "boj", "yen"), "CHF": ("swiss", "switzerland", "snb"),
+                  "CNY": ("china", "chinese", "pboc"), "USD": ("us", "u.s.", "american", "fed", "federal reserve", "wall street", "treasury")}
+
+
+def _currency_of(label: str) -> str | None:
+    m = re.search(r"\(([A-Z]{3})\)\s*$", label)
+    return m.group(1) if m else None
+
+
+def release_keys(label: str) -> list[str]:
+    """Words a headline about this release would contain, from the event label: 'Core Retail Sales m/m (USD)' -> ['core', 'retail', 'sales']."""
+    base = re.sub(r"\([^)]*\)", " ", label).lower()
+    return [w for w in re.split(r"[^a-z0-9/.]+", base) if w and w not in _TITLE_NOISE]
+
+
+def headlines_for_release(label: str, published_after: datetime, headlines: list, limit: int = 2) -> list:
+    keys = release_keys(label)
+    if not keys:
+        return []
+    cur = _currency_of(label)
+    hits = []
+    for h in headlines:
+        if h.published < published_after:
+            continue
+        t = h.title.lower()
+        if not (all(any(_has_word(t, alt) for alt in _RELEASE_SYNONYMS.get(k, (k,))) for k in keys) and re.search(r"\d", t)):
+            continue
+        if cur and cur != "USD" and not any(_has_word(t, w) for w in _COUNTRY_WORDS.get(cur, ())):
+            continue                         # a non-US release needs its country in the headline
+        if cur == "USD" and any(_has_word(t, w) for c, ws in _COUNTRY_WORDS.items() if c != "USD" for w in ws):
+            continue                         # a US release headline must not be about another country
+        hits.append(h)
+    return sorted(hits, key=lambda h: h.published)[:limit]
+
+
+def format_released(released: list, headlines: list) -> list[str]:
+    """Releases from the last 24 hours with their forecast and any headline that quotes a number. The feed has no actual figure."""
+    from .events import HIGH, MEDIUM
+
+    out = []
+    for e in released:
+        if e.tier not in (HIGH, MEDIUM):
+            continue
+        nums = ", ".join(x for x in (f"ACTUAL {e.actual}" if getattr(e, "actual", None) else "", f"forecast {e.forecast}" if getattr(e, "forecast", None) else "",
+                                     f"previous {e.previous}" if getattr(e, "previous", None) else "") if x)
+        out.append(f"  {e.time_utc:%a %d %b %H:%M}Z  {e.label} [{e.tier.upper()}]" + (f"  ({nums})" if nums else ""))
+        if getattr(e, "actual", None):
+            continue                         # the released figure is in the line above
+        if not (getattr(e, "forecast", None) or getattr(e, "previous", None)):
+            continue                         # a speech or meeting: nothing to compare with a number
+        found = headlines_for_release(e.label, e.time_utc, headlines)
+        if found:
+            out += [f"      headline {h.published:%H:%M}: {h.title}" for h in found]
+        else:
+            out.append("      no headline with a number yet: search for the actual (wire or official source) before using this release")
+    return out
 
 
 def format_quick(name: str, snap: dict, atr_pts: float, hourly: pd.DataFrame | None, long_pct: float | None, range20: tuple[float, float] | None, positions: int) -> str:
@@ -949,6 +1018,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ig_swing.challenge")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("brief")
+    sub.add_parser("results", help="releases from the last 24 hours with the forecast and any headline that quotes the number (no IG calls)")
     sub.add_parser("movers", help="one-line scan of the biggest moves across the default markets, for a health check (live quotes only)")
     q = sub.add_parser("quick", help="a fast read on one market, for a sudden move")
     q.add_argument("--market", required=True, help="any IG market: a name from the briefing, an epic, or search words")
@@ -992,6 +1062,21 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             journal.record_event(now.isoformat(), EXCLUDED_KIND, json.dumps({"idea_id": args.idea_id, "reason": args.reason}))
             print(f"idea {args.idea_id} tagged no-view and left out of results: {args.reason}")
+            return 0
+        if args.cmd == "results":
+            import requests
+            from .config import optional_key
+            from .events import load_events, split_released
+            from .news import load_headlines
+
+            sess = requests.Session()
+            evs, ev_notes = load_events(sess, now.date() - timedelta(days=1), now.date() + timedelta(days=1), optional_key("FRED_API_KEY"), world=True)
+            heads, hd_notes = load_headlines(sess, optional_key("FINNHUB_API_KEY"), now, 24, 600)
+            _up, rel = split_released(evs, now)
+            print(f"Released in the last 24 hours, to {now:%a %d %b %H:%M}Z (ACTUAL against forecast where the calendar has the figure; otherwise a headline with the number, or search for it):")
+            print("\n".join(format_released(rel, drop_promotional(heads))) or "  none")
+            for n in ev_notes + hd_notes:
+                print(f"  note: {n}")
             return 0
         env = ig_env()
         creds = load_credentials(env)
@@ -1234,10 +1319,13 @@ def main(argv: list[str] | None = None) -> int:
                 journal.record_baselines(now.date().isoformat(), baseline_ideas_from_rows(rows, now))
         except Exception:
             notes.append("archive: could not be written")
-        events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"), world=True)
-        heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 400)
-        ev_text = format_events(events)
+        from .events import split_released
+        events, ev_notes = load_events(session, now.date() - timedelta(days=1), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"), world=True)
+        heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 24, 600)
+        upcoming_, released_ = split_released(events, now)
+        ev_text = format_events(upcoming_)
         clean_heads = drop_promotional(heads)
+        released_text = format_released(released_, clean_heads)
         hd_text = [f"  {h.published:%H:%M} {h.title}" for h in clean_heads][:10]
         market_news = []
         for r in rows:
@@ -1257,7 +1345,7 @@ def main(argv: list[str] | None = None) -> int:
         if allowance_line:
             notes.insert(0, allowance_line)
         print(format_briefing(now, rows, acct.equity, len(client.get_positions()), notes + ev_notes + hd_notes, ev_text, hd_text, market_news, earnings_text,
-                              ([ln] if (ln := regime_read(macro, next((r["day_pct"] for r in rows if r["market"] == "US 500"), None))) else []) + format_macro(macro)))
+                              ([ln] if (ln := regime_read(macro, next((r["day_pct"] for r in rows if r["market"] == "US 500"), None))) else []) + format_macro(macro), released_text))
         limits = risk_limits(env)
         print(f"Risk profile: {limits.name} (cap {limits.max_risk_per_trade_pct:g}% a trade = £{acct.equity * limits.max_risk_per_trade_pct / 100:.2f}, floor £{limits.min_equity_gbp:g}, max {limits.max_open_positions} positions)")
         return 0

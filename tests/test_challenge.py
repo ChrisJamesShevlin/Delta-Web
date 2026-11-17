@@ -647,3 +647,25 @@ def test_report_splits_results_by_book_stacking_at_entry():
     m = {"total": 3, "pending": 0, "finished": [idea(1, {"drivers": [{"driver": "USD"}]}), idea(2, {"drivers": []}), idea(3, None)], "pairs": [], "calibration": ch.calibration([])}
     text = ch.format_report(m)
     assert "book stacking at entry stacked: n=1" in text and "book stacking at entry independent: n=1" in text and "not recorded: n=1" in text
+
+
+def test_release_headlines_match_the_country_and_a_number_and_skip_speeches():
+    from datetime import datetime, timezone
+    from ig_swing.events import Event, HIGH
+    from ig_swing.news import Headline
+    t0 = datetime(2026, 11, 17, 7, 0, tzinfo=timezone.utc)
+    hs = [Headline("UK average earnings growth slows to 3.4% in three months to September", t0.replace(minute=5), "a"),
+          Headline("Australian wage growth hits 1.0%", t0.replace(minute=6), "b"),
+          Headline("UK earnings season: banks rally", t0.replace(minute=7), "c"),          # no number
+          Headline("US retail sales rise 0.3% in October", t0.replace(minute=8), "d"),
+          Headline("Canada retail sales rise 0.3% in September", t0.replace(minute=9), "e")]
+    uk = ch.headlines_for_release("Average Earnings Index 3m/y (GBP)", t0, hs)
+    assert [h.source for h in uk] == ["a"]
+    us = ch.headlines_for_release("Retail Sales m/m (USD)", t0, hs)
+    assert [h.source for h in us] == ["d"]
+    assert ch.headlines_for_release("Average Earnings Index 3m/y (GBP)", t0.replace(minute=30), hs) == []   # published before the release is ignored
+    rel = [Event(t0.date(), "Average Earnings Index 3m/y (GBP)", HIGH, "world calendar", t0, "3.5%", "3.7%"),
+           Event(t0.date(), "ECB President Lagarde Speaks (EUR)", HIGH, "world calendar", t0)]
+    text = "\n".join(ch.format_released(rel, hs))
+    assert "forecast 3.5%, previous 3.7%" in text and "three months to September" in text and "Lagarde" in text and "search for the actual" not in text
+    assert "search for the actual" in "\n".join(ch.format_released(rel[:1], []))

@@ -202,14 +202,14 @@ def test_world_rows_keep_medium_and_high_for_our_currencies_in_utc_with_forecast
 
 
 def test_world_feed_replaces_us_rows_inside_its_span_and_next_week_404_is_fine():
-    s = Session([Resp(200, body=WORLD_ROWS), Resp(404), Resp(200, text="")])        # this week, next week (not published), BLS (empty)
+    s = Session([Resp(503), Resp(200, body=WORLD_ROWS), Resp(404), Resp(200, text="")])   # primary down, backup this week, next week (not published), BLS
     evs, notes = load_events(s, date(2026, 11, 16), date(2026, 11, 20), None, world=True)
     assert [e.label for e in evs if e.source == "world calendar"] == ["Retail Sales m/m (USD)", "CPI y/y (GBP)"]
-    assert not any("world calendar" in n for n in notes)
+    assert any("primary source unavailable (HTTP 503)" in n and "no actual figures" in n for n in notes)
 
 
 def test_world_feed_failure_is_a_note_and_other_sources_still_load():
-    s = Session([Resp(503), Resp(200, text=ICS)])
+    s = Session([Resp(503), Resp(503), Resp(200, text=ICS)])
     evs, notes = load_events(s, date(2026, 11, 11), date(2026, 11, 30), None, world=True)
     assert any(n.startswith("world calendar: unavailable (HTTP 503)") for n in notes) and any(e.source == "BLS" for e in evs)
 
@@ -218,3 +218,46 @@ def test_world_is_off_by_default_so_the_older_flows_are_unchanged():
     s = Session([Resp(200, text=ICS)])
     evs, _ = load_events(s, date(2026, 11, 11), date(2026, 11, 30), None)
     assert len(s.calls) == 1 and all(e.source != "world calendar" for e in evs)
+
+
+BQ_ROWS = [
+    {"time": "2026-11-17T07:00:00Z", "currency": "GBP", "name": "Unemployment Rate", "importance": "high", "unit": "percent", "multiplier": None,
+     "actual": 4.6, "forecast": 4.7, "previous": 4.7, "timeMode": "exact"},
+    {"time": "2026-11-17T07:00:00Z", "currency": "GBP", "name": "Employment Change", "importance": "medium", "unit": None, "multiplier": "thousands",
+     "actual": 156, "forecast": 25.0, "previous": 102, "timeMode": "exact"},
+    {"time": "2026-11-17T13:30:00Z", "currency": "USD", "name": "Retail Sales m/m", "importance": "high", "unit": "percent", "multiplier": "none",
+     "actual": None, "forecast": 0.3, "previous": 0.8, "timeMode": "exact"},
+    {"time": "2026-11-17T00:00:00Z", "currency": "EUR", "name": "Bank holiday", "importance": "medium", "unit": "none", "multiplier": "none",
+     "actual": None, "forecast": None, "previous": None, "timeMode": "allday"},
+    {"time": "2026-11-17T09:00:00Z", "currency": "EUR", "name": "A low one", "importance": "low", "actual": 1, "forecast": 1, "previous": 1},
+    {"time": "2026-11-17T09:00:00Z", "currency": "TRY", "name": "Other currency", "importance": "high", "actual": 1, "forecast": 1, "previous": 1},
+]
+
+
+def test_biquote_rows_carry_actuals_units_and_date_only_times():
+    evs, span = events.parse_biquote_rows(BQ_ROWS)
+    labels = [e.label for e in evs]
+    assert labels == ["Unemployment Rate (GBP)", "Employment Change (GBP)", "Retail Sales m/m (USD)", "Bank holiday (EUR)"]
+    un, emp, rs, hol = evs
+    assert (un.actual, un.forecast, un.previous) == ("4.6%", "4.7%", "4.7%") and un.tier == HIGH
+    assert (emp.actual, emp.forecast, emp.previous) == ("156K", "25K", "102K")
+    assert rs.actual is None and rs.forecast == "0.3%" and hol.time_utc is None
+    assert span == (date(2026, 11, 17), date(2026, 11, 17))
+
+
+def test_primary_world_source_wins_and_its_actuals_reach_the_event_list():
+    s = Session([Resp(200, body=BQ_ROWS), Resp(200, text="")])                       # primary, BLS
+    evs, notes = load_events(s, date(2026, 11, 16), date(2026, 11, 18), None, world=True)
+    un = next(e for e in evs if e.label == "Unemployment Rate (GBP)")
+    assert un.actual == "4.6%" and not any("world calendar" in n for n in notes)
+    assert s.calls[0][1]["from"] == "2026-11-16" and s.calls[0][1]["to"] == "2026-11-18" and "GB" in s.calls[0][1]["countries"]
+    assert len(s.calls) == 2                                                          # the backup feed was not touched
+
+
+def test_actual_is_shown_in_the_event_and_released_lines():
+    from ig_swing import challenge as ch
+    evs, _ = events.parse_biquote_rows(BQ_ROWS)
+    text = "\n".join(ch.format_events(evs))
+    assert "(actual 4.6%, forecast 4.7%, previous 4.7%)" in text
+    rel = "\n".join(ch.format_released(evs[:1], []))
+    assert "ACTUAL 4.6%, forecast 4.7%" in rel and "search for the actual" not in rel
