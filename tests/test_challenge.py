@@ -627,3 +627,23 @@ def test_stop_risk_is_zero_once_the_stop_is_at_breakeven():
     buy = SimpleNamespace(direction="BUY", open_level=100.0, stop_level=90.0, size=0.5)
     assert themes.stop_risk_gbp(sell) == 0.0 and themes.stop_risk_gbp(buy) == pytest.approx(5.0)
     assert themes.stop_risk_gbp(SimpleNamespace(direction="BUY", open_level=100.0, stop_level=None, size=1.0)) == 0.0
+
+
+def test_driver_stack_is_recorded_as_structure_and_bucketed_for_the_report():
+    from ig_swing import themes
+    rows = [{"market": "EUR/USD", "direction": "SELL", "risk_gbp": 0.93}, {"market": "Gold", "direction": "SELL", "risk_gbp": 1.10}]
+    st = themes.driver_stack("AUD/USD", "SELL", 0.70, rows, 50.0)
+    assert st["book_risk_gbp"] == 2.03 and st["book_risk_pct"] == 4.1 and st["new_risk_gbp"] == 0.70
+    usd = next(d for d in st["drivers"] if d["driver"] == "USD")
+    assert usd["positions"] == 2 and usd["risk_gbp"] == 1.63 and usd["with"] == ["sell EUR/USD"]
+    assert themes.stack_bucket({"stack": st}) == "stacked"
+    assert themes.stack_bucket({"stack": themes.driver_stack("Crude oil", "BUY", 1.0, rows, 50.0)}) == "independent"
+    assert themes.stack_bucket({}) == "not recorded" and themes.stack_bucket(None) == "not recorded" and themes.stack_bucket({"stack": None}) == "not recorded"
+
+
+def test_report_splits_results_by_book_stacking_at_entry():
+    def idea(i, stack):
+        return ({"id": i, "playbook": "trend", "confidence": "MEDIUM", "research": "headlines", "features": {"stack": stack}}, {"r": 1.0 if i % 2 else -1.0, "reason": "target"})
+    m = {"total": 3, "pending": 0, "finished": [idea(1, {"drivers": [{"driver": "USD"}]}), idea(2, {"drivers": []}), idea(3, None)], "pairs": [], "calibration": ch.calibration([])}
+    text = ch.format_report(m)
+    assert "book stacking at entry stacked: n=1" in text and "book stacking at entry independent: n=1" in text and "not recorded: n=1" in text

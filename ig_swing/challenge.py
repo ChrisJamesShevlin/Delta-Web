@@ -30,6 +30,7 @@ import pandas as pd
 
 from .config import CHALLENGE
 from .macro import format_macro, load_macro, regime_read
+from .themes import stack_bucket
 from .techread import format_tech, long_read, swing_levels, tech_read
 
 UTC = timezone.utc
@@ -476,10 +477,10 @@ def format_report(m: dict[str, Any]) -> str:
         lines.append(f"  NOTE: {m['unscored']} idea(s) could not be scored this run because IG's weekly price allowance is short (nothing is scored on other data); run again after it resets")
     if fin:
         lines.append(f"  all: mean {mean:+.2f}R, SE {('n/a' if se != se else f'{se:.2f}')}, win rate {pct(sum(1 for r in rs if r > 0) / len(rs))}")
-        for label, key in (("playbook", "playbook"), ("confidence", "confidence"), ("research", "research"), ("confirmation", "confirmation"), ("news timing", "news")):
+        for label, key in (("playbook", "playbook"), ("confidence", "confidence"), ("research", "research"), ("confirmation", "confirmation"), ("news timing", "news"), ("book stacking at entry", "stack")):
             groups: dict[str, list[float]] = {}
             for i, r in fin:
-                val = ((i.get("features") or {}).get("confirm") or {}).get("label", "unknown") if key == "confirmation" else (news_bucket(i.get("features")) if key == "news" else i.get(key, "headlines"))
+                val = ((i.get("features") or {}).get("confirm") or {}).get("label", "unknown") if key == "confirmation" else (news_bucket(i.get("features")) if key == "news" else (stack_bucket(i.get("features")) if key == "stack" else i.get(key, "headlines")))
                 groups.setdefault(val, []).append(r["r"])
             for g, xs in sorted(groups.items()):
                 gm, _ = mean_se(xs)
@@ -1104,6 +1105,12 @@ def main(argv: list[str] | None = None) -> int:
             features["themes"] = exposure(info["name"], direction)
             features["confirm"] = conf_
             features["overlap"] = overlaps(info["name"], direction, open_)
+            try:
+                from .themes import driver_stack, rows_from_positions
+                features["stack"] = driver_stack(info["name"], direction, args.stop * float(info.get("min_stake") or 0.01), rows_from_positions(client.get_positions()),
+                                                 client.get_account(creds.account_id).equity)
+            except Exception:
+                features["stack"] = None             # recording only: never let it stop an idea being written
             idea = make_idea(n, now, info["name"], direction, entry, info["offer"] - info["bid"], args.stop, args.target, args.p_win, args.playbook,
                              args.confidence, args.thesis, args.horizon, args.live, args.research, args.source, info["epic"], features)
             journal.record_event(now.isoformat(), KIND, json.dumps(idea))
@@ -1119,6 +1126,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  News cited: {nf['headline']} ({nf['minutes_late']:.0f} minutes old when written{mv})")
             for o_ in features["overlap"]:
                 print(f"  Overlap: {o_} (a warning only; treat it as one bet)")
+            for d_ in (features.get("stack") or {}).get("drivers", []):
+                print(f"  Driver stack: {d_['driver']} would be position {d_['positions']}, combined stop risk £{d_['risk_gbp']:.2f} ({d_['risk_pct']:.0f}% of equity) (recorded, information only)")
             return 0
         if args.cmd == "quick":
             from .indicators import atr

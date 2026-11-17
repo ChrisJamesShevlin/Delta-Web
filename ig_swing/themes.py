@@ -198,21 +198,39 @@ def book_view(rows: list[dict[str, Any]], equity: float) -> list[str]:
     return lines
 
 
-def pre_trade_exposure(market: str, direction: str, new_risk_gbp: float, rows: list[dict[str, Any]], equity: float) -> list[str]:
-    """Drivers the new trade would stack on: for each driver it shares the same way with open positions, the count and the combined stop risk with it added."""
+def driver_stack(market: str, direction: str, new_risk_gbp: float, rows: list[dict[str, Any]], equity: float) -> dict[str, Any]:
+    """Structured version of the driver check, for recording on an idea: the book's stop risk before the trade, and for each driver the new
+    trade shares the same way with open positions, how many positions and how much combined stop risk there would be with it added."""
     mine = exposure(market, direction)
-    if not mine:
-        return []
     new_row = {"market": canonical(market), "direction": direction.upper(), "risk_gbp": new_risk_gbp}
+    pct = lambda x: (100 * x / equity) if equity else 0.0
+    book = sum(r["risk_gbp"] for r in rows)
+    out: dict[str, Any] = {"book_risk_gbp": round(book, 2), "book_risk_pct": round(pct(book), 1), "new_risk_gbp": round(new_risk_gbp, 2), "drivers": []}
+    if not mine:
+        return out
     before = _same_sign_groups(rows)
-    after = _same_sign_groups(rows + [new_row])
-    lines = []
-    for key, members in after.items():
+    for key, members in _same_sign_groups(rows + [new_row]).items():
         if new_row not in members or key not in before:
             continue
-        theme, sg = key
         risk = sum(m["risk_gbp"] for m in members)
-        names = ", ".join(f"{m['direction'].lower()} {m['market']}" for m in members if m is not new_row)
-        label = f"{theme}, net {'long' if sg > 0 else 'short'} dollar" if theme.startswith("dollar") else _word(theme, sg)
-        lines.append(f"driver check: {label} would be position {len(members)} of the same bet (with {names}); combined stop risk £{risk:.2f} ({(100 * risk / equity) if equity else 0:.0f}% of equity)")
+        out["drivers"].append({"driver": key[0], "sign": key[1], "positions": len(members), "risk_gbp": round(risk, 2), "risk_pct": round(pct(risk), 1),
+                               "with": [f"{m['direction'].lower()} {m['market']}" for m in members if m is not new_row]})
+    return out
+
+
+def stack_bucket(features: dict[str, Any] | None) -> str:
+    """For the report: 'stacked' if the idea shared a driver with an open position when written, 'independent' if not, 'not recorded' for older ideas."""
+    stack = (features or {}).get("stack")
+    if not stack:
+        return "not recorded"
+    return "stacked" if stack.get("drivers") else "independent"
+
+
+def pre_trade_exposure(market: str, direction: str, new_risk_gbp: float, rows: list[dict[str, Any]], equity: float) -> list[str]:
+    """Drivers the new trade would stack on: for each driver it shares the same way with open positions, the count and the combined stop risk with it added."""
+    lines = []
+    for d in driver_stack(market, direction, new_risk_gbp, rows, equity)["drivers"]:
+        label = f"{d['driver']}, net {'long' if d['sign'] > 0 else 'short'} dollar" if d["driver"].startswith("dollar") else _word(d["driver"], d["sign"])
+        lines.append(f"driver check: {label} would be position {d['positions']} of the same bet (with {', '.join(d['with'])}); "
+                     f"combined stop risk £{d['risk_gbp']:.2f} ({d['risk_pct']:.0f}% of equity)")
     return lines
