@@ -19,7 +19,8 @@ REGION = {
     "Alphabet": ("US equities", "tech"), "Meta": ("US equities", "tech"), "Tesla": ("US equities",), "Netflix": ("US equities", "tech"),
     "Intel": ("US equities", "tech"),
 }
-OTHER = {"Gold": ("precious metals",), "Silver": ("precious metals",), "Crude oil": ("oil",), "Brent crude": ("oil",), "Natural gas": ("natural gas",)}
+OTHER = {"Gold": ("precious metals",), "Silver": ("precious metals",), "Crude oil": ("oil",), "Brent crude": ("oil",), "Natural gas": ("natural gas",),
+         "UK Gilts ETF": ("bonds",), "US Treasury ETF": ("bonds",)}
 SIGNAL_DIRECTIONS = ("BUY", "SELL")
 
 

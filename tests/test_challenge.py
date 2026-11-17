@@ -127,7 +127,7 @@ def test_loading_ideas_ignores_other_events_and_garbage():
 def test_every_market_has_a_class_and_the_mix_is_not_just_currencies():
     assert set(ch.ASSET_CLASS) == set(ch.ALL_MARKETS) and set(ch.ASSET_CLASS.values()) == set(ch.CLASS_ORDER)
     counts = {c: sum(1 for v in ch.ASSET_CLASS.values() if v == c) for c in ch.CLASS_ORDER}
-    assert counts == {"Stock indices": 8, "US shares": 9, "Metals": 2, "Energy": 3, "Currencies": 10}
+    assert counts == {"Stock indices": 8, "US shares": 9, "Metals": 2, "Energy": 3, "Currencies": 10, "Bonds": 2}
 
 
 def test_briefing_text_contains_the_pieces():
@@ -140,7 +140,7 @@ def test_briefing_text_contains_the_pieces():
 
 def test_constants():
     assert ch.KELLY_FRACTION == 0.125 and ch.CAP_UNTIL_CALIBRATED == 5.0 and ch.CAP_CALIBRATED == 10.0 and ch.CALIBRATION_MIN == 30
-    assert len(ch.ALL_MARKETS) == 32 and len({v[0] for v in ch.ALL_MARKETS.values()}) == 32 and all(v[2] > 0 for v in ch.ALL_MARKETS.values())
+    assert len(ch.ALL_MARKETS) == 34 and len({v[0] for v in ch.ALL_MARKETS.values()}) == 34 and all(v[2] > 0 for v in ch.ALL_MARKETS.values())
 
 
 def test_research_depth_and_sources_are_recorded_and_validated():
@@ -197,10 +197,10 @@ def test_more_than_fifty_markets_are_split_into_batches():
 
 
 def test_every_check_covers_all_markets_including_the_users_named_ones():
-    assert ch.MARKETS is ch.ALL_MARKETS and len(ch.MARKETS) == 32
+    assert ch.MARKETS is ch.ALL_MARKETS and len(ch.MARKETS) == 34
     for name in ("US 500", "Germany 40", "FTSE 100", "Japan 225", "Brent crude", "Gold", "US Tech 100", "Apple", "Meta"):
         assert name in ch.MARKETS
-    assert {ch.ASSET_CLASS[k] for k in ch.MARKETS} == {"Stock indices", "US shares", "Metals", "Energy", "Currencies"}   # not just currencies
+    assert {ch.ASSET_CLASS[k] for k in ch.MARKETS} == {"Stock indices", "US shares", "Metals", "Energy", "Currencies", "Bonds"}   # not just currencies
 
 
 def test_promotional_headlines_are_dropped_and_real_ones_kept():
@@ -227,7 +227,7 @@ def test_build_rows_covers_only_the_markets_it_is_given():
             return pd.DataFrame({"timestamp": pd.bdate_range("2026-10-01", periods=30), "open": c, "high": c + 1, "low": c - 1, "close": c})
 
     rows, notes = ch.build_rows(C(), 45.57, NOW, lambda df, now: df)
-    assert [r["market"] for r in rows] == list(ch.MARKETS) and len(rows) == 32 and notes == []
+    assert [r["market"] for r in rows] == list(ch.MARKETS) and len(rows) == 34 and notes == []
     share = next(r for r in rows if r["market"] == "Apple")
     assert share["atr"] is None and "no bars" in share["note"]                                   # shares are snapshot-only in the briefing
     two = {k: ch.MARKETS[k] for k in ("Gold", "US 500")}

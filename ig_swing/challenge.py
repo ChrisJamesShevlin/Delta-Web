@@ -64,6 +64,10 @@ ALL_MARKETS: dict[str, tuple[str, str, float]] = {
     "Japan 225": ("IX.D.NIKKEI.DAILY.IP", "JP225", 5.0),
     # US shares (24 hour markets). Snapshot only in the briefing (no daily bars) to protect the price allowance; the quick read adds bars.
     # The margin here is only a placeholder: the live margin is read from IG on every run. No sentiment id is known for shares.
+    # Bond ETF bets (added 2026-11-17, user: scan them with a view to trading them later). London-listed ETFs offered as daily bets,
+    # priced in pounds, margin 25%, spreads about 0.03%, no IG client sentiment, no Yahoo fallback symbol known. Read from IG's search on 2026-11-17.
+    "UK Gilts ETF": ("KA.D.GLTALN.DAILY.IP", "", 25.0),
+    "US Treasury ETF": ("KA.D.U10GLN.DAILY.IP", "", 25.0),
     "Apple": ("UA.D.AAPL.DAILY.IP", "", 20.0),
     "Microsoft": ("UC.D.MSFT.DAILY.IP", "", 20.0),
     "NVIDIA": ("UC.D.NVDA.DAILY.IP", "", 20.0),
@@ -95,8 +99,9 @@ ASSET_CLASS: dict[str, str] = {
     **{m: "Energy" for m in ("Crude oil", "Brent crude", "Natural gas")},
     **{m: "Stock indices" for m in ("US Tech 100", "US 500", "Wall Street", "US Russell 2000", "Germany 40", "FTSE 100", "France 40", "Japan 225")},
     **{m: "US shares" for m in SHARES},
+    **{m: "Bonds" for m in ("UK Gilts ETF", "US Treasury ETF")},
 }
-CLASS_ORDER = ("Stock indices", "US shares", "Metals", "Energy", "Currencies")
+CLASS_ORDER = ("Stock indices", "US shares", "Metals", "Energy", "Currencies", "Bonds")
 PLAYBOOKS = ("event_reaction", "news_thesis", "earnings", "trend", "sentiment", "other")
 RESEARCH_LEVELS = ("none", "headlines", "web")          # how much reading went into the idea, so the report can test whether it helps
 MAX_SOURCES = 6
@@ -582,6 +587,8 @@ MARKET_KEYWORDS: dict[str, tuple[str, ...]] = {
     "USD/JPY": ("yen", "boj", "japan", "dollar", "fed", "treasury yield"),
     "AUD/USD": ("aussie", "australia", "rba", "china", "dollar", "iron ore"),
     "Gold": ("gold", "bullion", "dollar", "fed", "treasury yield", "safe haven", "inflation"),
+    "UK Gilts ETF": ("gilt", "gilts", "bank of england", "boe", "bailey", "uk inflation", "uk yields", "reeves", "budget"),
+    "US Treasury ETF": ("treasury", "treasuries", "treasury yield", "10-year yield", "bond yields", "fed", "inflation", "auction"),
     "Crude oil": ("oil", "crude", "opec", "iran", "brent", "wti", "energy", "sanction"),
     "US Tech 100": ("nasdaq", "tech", "nvidia", "chip", " ai ", "apple", "microsoft", "fed", "earnings"),
     "US 500": ("s&p", "wall street", "stocks", "stock market", "fed", "earnings", "dow"),
