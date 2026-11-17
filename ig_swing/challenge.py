@@ -1014,11 +1014,59 @@ def format_movers(rows: list[dict[str, Any]], limit: int = 12) -> str:
     return "\n".join(lines)
 
 
+CALCHECK_KIND = "calendar_check"
+
+
+def record_calcheck(journal, now, event: str, ig_forecast: str | None, ig_actual: str | None,
+                    feed_forecast: str | None, feed_actual: str | None) -> dict:
+    """Journal one pair of figures: what IG's calendar showed and what our free feed said (journal only)."""
+    d = {"event": event, "ig_forecast": ig_forecast, "ig_actual": ig_actual,
+         "feed_forecast": feed_forecast, "feed_actual": feed_actual}
+    journal.record_event(now.isoformat(), CALCHECK_KIND, json.dumps(d))
+    return d
+
+
+def _num(x):
+    try:
+        return float(str(x).replace("%", "").replace(",", "").strip().rstrip("KMBkmb"))
+    except (TypeError, ValueError):
+        return None
+
+
+def format_calcheck(events: list[dict]) -> str:
+    rows = [json.loads(e["detail"]) for e in events if e.get("kind") == CALCHECK_KIND]
+    if not rows:
+        return "No calendar comparisons recorded yet."
+    out = [f"Calendar feed against IG's calendar ({len(rows)} releases compared; IG is taken as the reference):"]
+    fc_same = fc_n = ac_same = ac_n = 0
+    for r in rows:
+        a, b = _num(r.get("ig_forecast")), _num(r.get("feed_forecast"))
+        if a is not None and b is not None:
+            fc_n += 1
+            fc_same += abs(a - b) < 1e-9
+        a, b = _num(r.get("ig_actual")), _num(r.get("feed_actual"))
+        if r.get("ig_actual") is not None:
+            ac_n += 1
+            ac_same += (b is not None and a is not None and abs(a - b) < 1e-9)
+        out.append(f"  {r['event']}: forecast IG {r.get('ig_forecast')} / feed {r.get('feed_forecast')}; actual IG {r.get('ig_actual')} / feed {r.get('feed_actual')}")
+    out.append(f"  Forecasts identical: {fc_same} of {fc_n}. Actuals identical (feed had the figure): {ac_same} of {ac_n}.")
+    if len(rows) < 30:
+        out.append("  Fewer than about 30 comparisons: no conclusion about the feed yet.")
+    return "\n".join(out)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ig_swing.challenge")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("brief")
     sub.add_parser("results", help="releases from the last 24 hours with the forecast and any headline that quotes the number (no IG calls)")
+    cc = sub.add_parser("calcheck", help="journal IG's calendar figures against our feed's for one release, or print the comparison (no IG calls)")
+    cc.add_argument("--event")
+    cc.add_argument("--ig-forecast")
+    cc.add_argument("--ig-actual")
+    cc.add_argument("--feed-forecast")
+    cc.add_argument("--feed-actual")
+    cc.add_argument("--report", action="store_true")
     sub.add_parser("movers", help="one-line scan of the biggest moves across the default markets, for a health check (live quotes only)")
     q = sub.add_parser("quick", help="a fast read on one market, for a sudden move")
     q.add_argument("--market", required=True, help="any IG market: a name from the briefing, an epic, or search words")
@@ -1062,6 +1110,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             journal.record_event(now.isoformat(), EXCLUDED_KIND, json.dumps({"idea_id": args.idea_id, "reason": args.reason}))
             print(f"idea {args.idea_id} tagged no-view and left out of results: {args.reason}")
+            return 0
+        if args.cmd == "calcheck":
+            if args.report or not args.event:
+                print(format_calcheck(journal.events()))
+                return 0
+            d = record_calcheck(journal, now, args.event, args.ig_forecast, args.ig_actual, args.feed_forecast, args.feed_actual)
+            print(f"RECORDED: {d['event']}: IG forecast {d['ig_forecast']}, feed forecast {d['feed_forecast']}; IG actual {d['ig_actual']}, feed actual {d['feed_actual']}")
             return 0
         if args.cmd == "results":
             import requests

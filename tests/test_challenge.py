@@ -669,3 +669,20 @@ def test_release_headlines_match_the_country_and_a_number_and_skip_speeches():
     text = "\n".join(ch.format_released(rel, hs))
     assert "forecast 3.5%, previous 3.7%" in text and "three months to September" in text and "Lagarde" in text and "search for the actual" not in text
     assert "search for the actual" in "\n".join(ch.format_released(rel[:1], []))
+
+
+def test_calcheck_records_and_compares(tmp_path):
+    import json as _json
+    from datetime import datetime, timezone
+    from ig_swing.challenge import format_calcheck, record_calcheck
+    from ig_swing.journal import Journal
+    j = Journal(tmp_path / "j.db")
+    assert "No calendar comparisons" in format_calcheck(j.events())
+    now = datetime(2026, 11, 17, 13, 31, tzinfo=timezone.utc)
+    record_calcheck(j, now, "US Retail Sales m/m", "0.2%", "0.5%", "0.3%", "0.5%")
+    record_calcheck(j, now, "ZEW Germany", "29", "35.6", "29", None)
+    text = format_calcheck(j.events())
+    assert "2 releases compared" in text
+    assert "Forecasts identical: 1 of 2" in text
+    assert "Actuals identical (feed had the figure): 1 of 2" in text
+    assert "no conclusion" in text
