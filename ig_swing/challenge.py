@@ -29,7 +29,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from .config import CHALLENGE
-from .macro import format_macro, load_macro
+from .macro import format_macro, load_macro, regime_read
 from .techread import format_tech, long_read, swing_levels, tech_read
 
 UTC = timezone.utc
@@ -368,6 +368,8 @@ def baseline_ideas_from_rows(rows: list[dict], now: datetime) -> list[dict[str, 
     a target of 3 ATR (2 to 1), 5 days. Markets without daily bars (the shares) are left out. Scored with the same machinery as my ideas."""
     out = []
     for r in rows:
+        if ASSET_CLASS.get(r["market"]) == "Bonds":      # scanned for context and hedging, not traded regularly: kept out of the daily benchmark
+            continue
         if not (r.get("atr") and r.get("sma20") and r.get("bid") and r.get("offer")):
             continue
         direction = "BUY" if r["price"] > r["sma20"] else "SELL"
@@ -1025,6 +1027,13 @@ def main(argv: list[str] | None = None) -> int:
                     m_ = move_in_r(p_, initial_risk_points(p_, trades_.get(p_.deal_id)))
                     held_[nm_] = f"{p_.direction} " + ("n/a" if m_ is None else f"{m_:+.2f}R")
             print(format_movers(movers_rows(quotes_, stats_, held_)))
+            try:
+                import requests as _rq4
+                us500_ = quotes_.get("US 500", (None, None))[1]
+                rl_ = regime_read(load_macro(_rq4.Session()), us500_)
+                print(rl_ if rl_ else "  Regime read: unavailable (Yahoo macro data missing)")
+            except Exception:
+                print("  Regime read: unavailable")
             return 0
         if args.cmd == "find":
             equity = client.get_account(creds.account_id).equity
@@ -1238,7 +1247,7 @@ def main(argv: list[str] | None = None) -> int:
         if allowance_line:
             notes.insert(0, allowance_line)
         print(format_briefing(now, rows, acct.equity, len(client.get_positions()), notes + ev_notes + hd_notes, ev_text, hd_text, market_news, earnings_text,
-                              format_macro(macro)))
+                              ([ln] if (ln := regime_read(macro, next((r["day_pct"] for r in rows if r["market"] == "US 500"), None))) else []) + format_macro(macro)))
         limits = risk_limits(env)
         print(f"Risk profile: {limits.name} (cap {limits.max_risk_per_trade_pct:g}% a trade = £{acct.equity * limits.max_risk_per_trade_pct / 100:.2f}, floor £{limits.min_equity_gbp:g}, max {limits.max_open_positions} positions)")
         return 0

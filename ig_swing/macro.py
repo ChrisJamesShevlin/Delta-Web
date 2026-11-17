@@ -54,3 +54,31 @@ def format_macro(data: dict[str, dict[str, float]]) -> list[str]:
         else:
             lines.append(f"  {name}: {m['level']:.2f}, {m['day_pct']:+.2f}% today, {m['five_day_pct']:+.2f}% over 5 sessions")
     return lines
+
+
+def regime_read(data: dict[str, dict[str, float]], equity_day_pct: float | None) -> str | None:
+    """One descriptive line on what kind of day it is, from the US 10-year yield, the VIX, the dollar and the US 500's move today.
+    Context only, no rule attached: stocks and bonds do not always move against each other (they fell together on 2026-11-16)."""
+    y, v, d = data.get("US 10-year yield"), data.get("VIX"), data.get("Dollar index")
+    if not y or not v or equity_day_pct is None:
+        return None
+    dollar = "" if not d else f", dollar {d['five_day_pct']:+.1f}% over 5 sessions"
+    facts = f"US 500 {equity_day_pct:+.2f}%, 10-year yield {y['day']:+.2f} points, VIX {v['day_pct']:+.0f}%{dollar}"
+    stocks_down, stocks_up = equity_day_pct <= -0.7, equity_day_pct >= 0.7
+    fear, calm = v["day_pct"] >= 5.0, v["day_pct"] <= -5.0
+    yields_up, yields_down = y["day"] >= 0.03, y["day"] <= -0.03
+    if stocks_down and fear and yields_up:
+        label = "RATE FEAR: stocks and bonds falling together, so bonds and gold are not a haven today"
+    elif stocks_down and fear and yields_down:
+        label = "FLIGHT TO SAFETY: bonds bid, stocks down, fear rising"
+    elif stocks_down and fear:
+        label = "STOCKS DOWN, FEAR RISING: bonds flat, no clear haven flow"
+    elif stocks_down:
+        label = "EQUITIES SOFT without a fear spike" + (", with yields rising" if yields_up else "")
+    elif fear and not stocks_up:
+        label = "VIX UP WITHOUT A STOCK SELLOFF: hedging demand, often ahead of an event"
+    elif stocks_up and calm:
+        label = "RISK-ON: stocks up, fear falling"
+    else:
+        label = "NO CLEAR REGIME"
+    return f"  Regime read: {label} ({facts}). Descriptive only; the stock and bond link changes with the regime."
