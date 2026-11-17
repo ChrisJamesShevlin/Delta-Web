@@ -638,7 +638,7 @@ def relevant_headlines(headlines: list, market: str, limit: int = 6, macro_paddi
     return (hit + (macro if macro_padding else []))[:limit]
 
 
-def format_events(events: list, limit: int = 8) -> list[str]:
+def format_events(events: list, limit: int = 16) -> list[str]:
     from .events import HIGH, MEDIUM
 
     out = []
@@ -646,7 +646,8 @@ def format_events(events: list, limit: int = 8) -> list[str]:
         if e.tier not in (HIGH, MEDIUM):
             continue
         when = f"{e.time_utc:%a %d %b %H:%M}Z" if getattr(e, "time_utc", None) else f"{e.day:%a %d %b} (time n/a)"
-        out.append(f"  {when}  {e.label} [{e.tier.upper()}]")
+        nums = ", ".join(x for x in (f"forecast {e.forecast}" if getattr(e, "forecast", None) else "", f"previous {e.previous}" if getattr(e, "previous", None) else "") if x)
+        out.append(f"  {when}  {e.label} [{e.tier.upper()}]" + (f"  ({nums})" if nums else ""))
     return out[:limit]
 
 
@@ -1089,7 +1090,7 @@ def main(argv: list[str] | None = None) -> int:
 
                 from .config import optional_key
                 from .events import load_events
-                evs_, _ = load_events(requests.Session(), now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
+                evs_, _ = load_events(requests.Session(), now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"), world=True)
             except Exception:
                 evs_ = []
             features = idea_features(info, atr_pts, range_pos, long_pct, evs_, now)
@@ -1167,7 +1168,7 @@ def main(argv: list[str] | None = None) -> int:
             from .news import load_headlines
 
             session = requests.Session()
-            events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
+            events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"), world=True)
             heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 400)
             ev_lines = format_events(events)
             print("  Events, next 48 hours:" + ("" if ev_lines else " none found"))
@@ -1233,7 +1234,7 @@ def main(argv: list[str] | None = None) -> int:
                 journal.record_baselines(now.date().isoformat(), baseline_ideas_from_rows(rows, now))
         except Exception:
             notes.append("archive: could not be written")
-        events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"))
+        events, ev_notes = load_events(session, now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"), world=True)
         heads, hd_notes = load_headlines(session, optional_key("FINNHUB_API_KEY"), now, 12, 400)
         ev_text = format_events(events)
         clean_heads = drop_promotional(heads)

@@ -99,6 +99,8 @@ class Event:
     tier: str
     source: str
     time_utc: datetime | None = None  # None means the source gives a date only
+    forecast: str | None = None       # consensus, only from the world calendar feed
+    previous: str | None = None
 
 
 def _normalise(name: str) -> str:
@@ -231,6 +233,59 @@ def central_bank_events(start: date, end: date) -> list[Event]:
 # ---- combine ------------------------------------------------------------
 
 
+# ---- world calendar feed (added 2026-11-17) -----------------------------
+# A free weekly JSON feed (this week; next week once it is published) with release times, an impact rating, the consensus forecast and the
+# previous value for the currencies we trade. It is an unofficial feed (it mirrors a widely used retail calendar), so it can change or
+# disappear and its numbers are not a primary source: check a high-impact number against the official release. Used by the challenge only.
+WORLD_FEED_URLS = ("https://nfs.faireconomy.media/ff_calendar_thisweek.json", "https://nfs.faireconomy.media/ff_calendar_nextweek.json")
+WORLD_CURRENCIES = ("USD", "EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF", "CNY")
+_IMPACT_TIER = {"high": HIGH, "medium": MEDIUM}
+
+
+def parse_world_rows(rows: list[dict]) -> tuple[list[Event], tuple[date, date] | None]:
+    """Medium and high impact rows for the currencies we trade, with the span of days the feed covers (all impacts), or None if it is empty."""
+    out: list[Event] = []
+    days: list[date] = []
+    for r in rows:
+        try:
+            when = datetime.fromisoformat(str(r["date"])).astimezone(UTC)
+        except (KeyError, ValueError):
+            continue
+        days.append(when.date())
+        tier = _IMPACT_TIER.get(str(r.get("impact", "")).strip().lower())
+        country = str(r.get("country", "")).strip().upper()
+        if tier is None or country not in WORLD_CURRENCIES:
+            continue
+        title = re.sub(r"\s+", " ", str(r.get("title", "")).strip())
+        if not title:
+            continue
+        out.append(Event(when.date(), f"{title} ({country})", tier, "world calendar", when, (str(r.get("forecast") or "").strip() or None),
+                         (str(r.get("previous") or "").strip() or None)))
+    return out, ((min(days), max(days)) if days else None)
+
+
+def fetch_world(session: Any, start: date, end: date) -> tuple[list[Event], tuple[date, date] | None]:
+    """This week's feed must load; next week's is tried and quietly skipped when it is not published yet."""
+    events: list[Event] = []
+    spans: list[tuple[date, date]] = []
+    for i, url in enumerate(WORLD_FEED_URLS):
+        try:
+            resp = session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=TIMEOUT_SECONDS)
+            if resp.status_code != 200:
+                raise SourceError(f"HTTP {resp.status_code}")
+            evs, span = parse_world_rows(resp.json())
+        except Exception as exc:
+            if i == 0:
+                raise (exc if isinstance(exc, SourceError) else SourceError(type(exc).__name__))
+            continue
+        events += evs
+        if span:
+            spans.append(span)
+    if not spans:
+        raise SourceError("no rows")
+    return [e for e in events if start <= e.day <= end], (min(a for a, _ in spans), max(b for _, b in spans))
+
+
 def merge_events(*lists: list[Event]) -> list[Event]:
     """Merge sources. A duplicate (same day and label) keeps the timed one."""
     best: dict[tuple[date, str], Event] = {}
@@ -257,10 +312,20 @@ def events_within(events: list[Event], now_utc: datetime, hours: float, tiers: t
     return out
 
 
-def load_events(session: Any, start: date, end: date, fred_key: str | None) -> tuple[list[Event], list[str]]:
-    """Fetch every source. One failing source never stops the others."""
+def load_events(session: Any, start: date, end: date, fred_key: str | None, world: bool = False) -> tuple[list[Event], list[str]]:
+    """Fetch every source. One failing source never stops the others. world=True adds the world calendar feed (euro area, UK, Japan, Australia and
+    the rest, with consensus forecasts); inside the days that feed covers it replaces the BLS and FRED rows, so a release is not listed twice."""
     notes: list[str] = []
     lists = [fomc_events(start, end), central_bank_events(start, end)]
+    world_events: list[Event] = []
+    coverage: tuple[date, date] | None = None
+    if world:
+        try:
+            world_events, coverage = fetch_world(session, start, end)
+        except SourceError as exc:
+            notes.append(f"world calendar: unavailable ({exc}); euro-area, UK and Australian releases are missing")
+        except Exception as exc:
+            notes.append(f"world calendar: unavailable ({type(exc).__name__}); euro-area, UK and Australian releases are missing")
     if end > max(FOMC_DECISION_DATES):
         notes.append(f"FOMC: hand-kept dates only run to {max(FOMC_DECISION_DATES)}")
 
@@ -272,9 +337,13 @@ def load_events(session: Any, start: date, end: date, fred_key: str | None) -> t
 
     for name, fn in jobs:
         try:
-            lists.append(fn())
+            got = fn()
+            if coverage is not None:
+                got = [e for e in got if not (coverage[0] <= e.day <= coverage[1])]
+            lists.append(got)
         except SourceError as exc:
             notes.append(f"{name}: unavailable ({exc})")
         except Exception as exc:  # type name only: messages can contain URLs with keys
             notes.append(f"{name}: unavailable ({type(exc).__name__})")
+    lists.append(world_events)
     return merge_events(*lists), notes

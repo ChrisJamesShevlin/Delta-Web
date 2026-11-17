@@ -180,3 +180,41 @@ def test_central_bank_decision_days_are_in_the_calendar():
     assert all(e.tier == ev.HIGH and e.time_utc is None for e in out)
     assert [e.day for e in out if e.label.startswith("ECB")] == [date(2026, 12, 17)]
     assert ev.central_bank_events(date(2026, 11, 1), date(2026, 11, 30)) == []         # nothing in a month with no decision
+
+
+WORLD_ROWS = [
+    {"title": "CPI y/y", "country": "GBP", "date": "2026-11-18T02:00:00-05:00", "impact": "High", "forecast": "3.6%", "previous": "3.5%"},
+    {"title": "Retail Sales m/m", "country": "USD", "date": "2026-11-17T08:30:00-05:00", "impact": "High", "forecast": "", "previous": "0.8%"},
+    {"title": "Some low item", "country": "EUR", "date": "2026-11-17T04:00:00-05:00", "impact": "Low", "forecast": "1", "previous": "2"},
+    {"title": "Odd country", "country": "XYZ", "date": "2026-11-17T04:00:00-05:00", "impact": "High", "forecast": "", "previous": ""},
+    {"title": "Broken date", "country": "EUR", "date": "not a date", "impact": "High"},
+]
+
+
+def test_world_rows_keep_medium_and_high_for_our_currencies_in_utc_with_forecasts():
+    evs, span = events.parse_world_rows(WORLD_ROWS)
+    assert [e.label for e in evs] == ["CPI y/y (GBP)", "Retail Sales m/m (USD)"]
+    cpi, rs = evs
+    assert cpi.time_utc == datetime(2026, 11, 18, 7, 0, tzinfo=UTC) and cpi.tier == HIGH and cpi.forecast == "3.6%" and cpi.previous == "3.5%"
+    assert rs.time_utc == datetime(2026, 11, 17, 13, 30, tzinfo=UTC) and rs.forecast is None and rs.previous == "0.8%"
+    assert span == (date(2026, 11, 17), date(2026, 11, 18))
+    assert events.parse_world_rows([]) == ([], None)
+
+
+def test_world_feed_replaces_us_rows_inside_its_span_and_next_week_404_is_fine():
+    s = Session([Resp(200, body=WORLD_ROWS), Resp(404), Resp(200, text="")])        # this week, next week (not published), BLS (empty)
+    evs, notes = load_events(s, date(2026, 11, 16), date(2026, 11, 20), None, world=True)
+    assert [e.label for e in evs if e.source == "world calendar"] == ["Retail Sales m/m (USD)", "CPI y/y (GBP)"]
+    assert not any("world calendar" in n for n in notes)
+
+
+def test_world_feed_failure_is_a_note_and_other_sources_still_load():
+    s = Session([Resp(503), Resp(200, text=ICS)])
+    evs, notes = load_events(s, date(2026, 11, 11), date(2026, 11, 30), None, world=True)
+    assert any(n.startswith("world calendar: unavailable (HTTP 503)") for n in notes) and any(e.source == "BLS" for e in evs)
+
+
+def test_world_is_off_by_default_so_the_older_flows_are_unchanged():
+    s = Session([Resp(200, text=ICS)])
+    evs, _ = load_events(s, date(2026, 11, 11), date(2026, 11, 30), None)
+    assert len(s.calls) == 1 and all(e.source != "world calendar" for e in evs)
