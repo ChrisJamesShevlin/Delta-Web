@@ -39,6 +39,8 @@ def test_move_in_r_for_long_and_short_in_favour_and_against():
 
 def test_trail_rule_breakeven_at_one_r_lock_one_r_at_two_and_never_loosens():
     assert mg.trail_target(pos(bid=11050.0), 100.0) is None                                        # only +0.5R
+    assert mg.trail_target(pos(bid=11075.0), 100.0) == 11000.0                                     # +0.75R: stop to breakeven
+    assert mg.trail_target(pos(bid=11074.0), 100.0) is None                                        # just under +0.75R
     assert mg.trail_target(pos(bid=11100.0), 100.0) == 11000.0                                     # +1R: stop to breakeven
     assert mg.trail_target(pos(bid=11200.0), 100.0) == 11100.0                                     # +2R: lock in 1R
     assert mg.trail_target(pos(bid=11100.0, stop=11000.0), 100.0) is None                          # already at breakeven: nothing to do

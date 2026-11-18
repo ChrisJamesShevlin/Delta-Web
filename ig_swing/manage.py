@@ -5,7 +5,7 @@
   python3 -m ig_swing.manage stop  --deal-id D1 (--level L | --breakeven | --distance POINTS) [--execute]
   python3 -m ig_swing.manage limit --deal-id D1 --level L [--execute]
   python3 -m ig_swing.manage trailing --deal-id D1 [--execute]   up 1R or more: stop to breakeven and an IG trailing stop (manual steps are printed if IG refuses)
-  python3 -m ig_swing.manage trail [--execute]          the mechanical rule: stop to breakeven at +1R, to +1R at +2R (skips positions IG is trailing)
+  python3 -m ig_swing.manage trail [--execute]          the mechanical rule: stop to breakeven at +0.75R, to +1R at +2R (skips positions IG is trailing)
   python3 -m ig_swing.manage history                    closed trades by exit reason: does cutting early help?
   python3 -m ig_swing.manage reconcile [--execute]      record trades IG closed on its own in the journal (journal only, no order)
 
@@ -56,15 +56,18 @@ def move_in_r(pos: Position, r_pts: float | None) -> float | None:
     return None
 
 
+BREAKEVEN_R = 0.75   # stop to breakeven once up this many R (was 1.0 until 2026-11-18, user go; see RULE_CHANGELOG.md)
+
+
 def trail_target(pos: Position, r_pts: float | None) -> float | None:
-    """The mechanical stop: breakeven once up 1R, lock in 1R once up 2R. None unless it tightens the stop and is on the right side of price."""
+    """The mechanical stop: breakeven once up 0.75R, lock in 1R once up 2R. None unless it tightens the stop and is on the right side of price."""
     m = move_in_r(pos, r_pts)
     if m is None or pos.stop_level is None or not r_pts:
         return None
     buy = pos.direction == "BUY"
     if m >= 2:
         new = pos.open_level + r_pts if buy else pos.open_level - r_pts
-    elif m >= 1:
+    elif m >= BREAKEVEN_R:
         new = pos.open_level
     else:
         return None
