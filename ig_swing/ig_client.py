@@ -172,10 +172,19 @@ class PriceCache:
         self._path(key).write_text(json.dumps({"fetched_at": time.time(), "rows": rows}))
 
     def load_allowance(self) -> int | None:
+        """Points left as last seen, or None when unknown. Once the saved reset time has passed the count is stale (IG has refilled it), so it is
+        treated as unknown and the next price pull reads the real figure. Without this a nearly spent allowance blocked pulls after the reset."""
         try:
-            return int(json.loads((self.directory / "allowance.json").read_text())["remaining"])
+            data = json.loads((self.directory / "allowance.json").read_text())
+            remaining = int(data["remaining"])
         except (OSError, ValueError, KeyError, TypeError):
             return None
+        try:
+            if data.get("resets_at") is not None and float(data["resets_at"]) <= time.time():
+                return None
+        except (ValueError, TypeError):
+            pass
+        return remaining
 
     def save_allowance(self, remaining: int, total: int | None = None, resets_in_seconds: float | None = None) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -507,6 +516,8 @@ class IGClient:
         info = self._cache.load_allowance_info()
         if info is None:
             return None
+        if info.get("resets_at") and float(info["resets_at"]) <= time.time():
+            return "IG price allowance: the saved count is out of date (the reset time has passed), the next price pull reads the real figure"
         text = f"IG price allowance: {info['remaining']}" + (f" of {info['total']}" if info.get("total") else "") + " points left"
         if info.get("resets_at"):
             hours = max(0.0, (float(info["resets_at"]) - time.time()) / 3600)

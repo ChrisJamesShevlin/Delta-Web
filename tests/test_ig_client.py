@@ -418,6 +418,18 @@ def test_the_reserve_blocks_routine_pulls_but_not_essential_ones(tmp_path):
     assert [p for p in session.paths() if p[1].startswith("/prices")]
 
 
+def test_a_stale_allowance_count_is_ignored_after_the_reset_time(tmp_path, monkeypatch):
+    import time as _time
+    cache = PriceCache(tmp_path)
+    cache.save_allowance(12, 10000, 3600)
+    assert cache.load_allowance() == 12
+    real = _time.time()
+    monkeypatch.setattr("ig_swing.ig_client.time.time", lambda: real + 2 * 3600)
+    assert cache.load_allowance() is None
+    c = IGClient(CREDS, session=FakeSession({}), cache=cache)
+    assert "out of date" in c.allowance_text()
+
+
 def test_allowance_text_shows_points_total_and_reset(tmp_path):
     cache = PriceCache(tmp_path)
     c = IGClient(CREDS, session=FakeSession({}), cache=cache)
