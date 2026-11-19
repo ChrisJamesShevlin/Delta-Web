@@ -158,6 +158,16 @@ def giveback_flag(peak: float | None, r_now: float | None) -> str:
     return ""
 
 
+TRAIL_ON_R = 0.5         # IG's trailing stop goes on from here and stays on (stop-rule test, 2026-11-19)
+
+
+def trailing_flag(r_now: float | None, trailing_distance: float | None) -> str:
+    """A flag when a trade is up TRAIL_ON_R or more and IG is not trailing its stop yet."""
+    if r_now is None or trailing_distance or r_now < TRAIL_ON_R:
+        return ""
+    return f"PUT THE TRAILING STOP ON: {r_now:+.2f}R and IG is not trailing it. Run `manage trail --execute`, then `manage trailing --deal-id ... --why ... --execute`"
+
+
 def atr_by_epic(snapshots: dict[str, dict]) -> dict[str, float]:
     """ATR in points from the newest archived snapshot of each market (no price allowance used)."""
     return {s["epic"]: float(s["atr"]) for s in snapshots.values() if s.get("epic") and s.get("atr")}

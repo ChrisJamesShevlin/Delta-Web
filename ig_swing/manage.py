@@ -355,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd in ("list", "exitline", "review"):
             from datetime import timedelta
-            from .review import atr_by_epic, exit_line_record, exit_lines, exit_status, flags, giveback_flag, latest_reviews, peak_r, review_line, review_record, validate_review
+            from .review import atr_by_epic, exit_line_record, exit_lines, exit_status, flags, giveback_flag, trailing_flag, latest_reviews, peak_r, review_line, review_record, validate_review
             evs = journal.events()
             peaks = peak_r(evs)
             lines, reviews = exit_lines(evs), latest_reviews(evs)
@@ -400,6 +400,9 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"    best at a check: {peaks[p.deal_id]:+.2f}R")
                 if gb:
                     attention.append(f"{p.instrument_name}: {gb}")
+                tf = trailing_flag(m_, p.trailing_distance)
+                if tf:
+                    attention.append(f"{p.instrument_name}: {tf}")
                 if m_ is not None:                                                  # a coarse record of how far each trade has run, for later review
                     journal.record_event(now.isoformat(), "position_check", json.dumps({"deal_id": p.deal_id, "r": round(m_, 3)}))
             if attention:

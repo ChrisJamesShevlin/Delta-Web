@@ -104,3 +104,11 @@ def test_newswatch_position_news_and_market_names():
     got = position_news("Spot Silver", opened, hs, NOW, last_review=NOW - timedelta(hours=2))
     assert [h.title for h, _ in got] == ["Silver slides as dollar firms"] and got[0][1] is True
     assert "Silver" in markets_named("Silver slides") and markets_named("The dollar and the Fed") == []
+
+
+def test_trailing_flag():
+    from ig_swing.review import trailing_flag
+    assert trailing_flag(0.6, None)
+    assert not trailing_flag(0.6, 148.0)
+    assert not trailing_flag(0.4, None)
+    assert not trailing_flag(None, None)
