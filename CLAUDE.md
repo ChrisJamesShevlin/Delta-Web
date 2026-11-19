@@ -306,6 +306,28 @@ Honest odds, from a simulation (2-to-1 reward to risk, 0.05R cost, floor £15, t
 
 **How it is run.** The user opens a session and says "market check" (or reports a sudden move): the project skill `.claude/skills/market-check/SKILL.md` runs the read-only briefing or a one-market quick read (`python3 -m ig_swing.challenge brief | quick --market X`), the assistant records shadow ideas (`... idea ...`) and at most one live candidate, and shows the exact order from the dry run (`python3 -m ig_swing.place ...`, which places nothing). Under the standing authorisation above the assistant then places it with `IG_LIVE_ORDERS=yes ... --confirm <token>`, where the token is tied to the exact stake, stop, target, market and direction, and reports to the user immediately. IG holds the stop server-side, so a position is protected between sessions. Automation, if any, is data-only (a scheduled briefing and the scoring report); the assistant's reading and every order stay in a session.
 
+## Stop-rule test on the trend playbook (pre-registered and run once on 2026-11-19)
+
+**Why.** On 18 and 19 November open profit of about £5 shrank to about £2.50 while the stop rules only moved stops to breakeven, and the user had asked for a week for stops to be moved into profit. The user asked for an impartial review of the stop rules, with one caveat that is theirs to set: giving back a good gain to end with nothing is not acceptable to them.
+
+**Pre-registration** (in the docstring of `ig_swing/stop_rule_test.py`, written before any data was fetched). Yahoo daily bars (free, no IG allowance) for 23 markets standing in for IG's daily bets, 2016 to 2026-11-18. Entries: the trend playbook as traded (close beyond the prior 20-session high or low, enter next open, 1R = 1.3 x ATR(14)), one trade per market at a time, cost 0.05R a trade. The stop in force is checked first each day (gaps fill at the open), then the target; the day's best price moves the stop only for the next day. Seven variants fixed in advance: V0 fixed stop and 2R target, 5 sessions; V1 breakeven at +1R; V2 breakeven at +0.75R; V3 the 19 Nov rule (breakeven at +0.5R, from +0.75R lock max(+0.25R, best - 0.75R)); V4 lock half of the best from +0.5R; V5 breakeven at +1R then trail 1R behind; V6 the 19 Nov rule with no target over 10 sessions. "Good gain to nothing" = reached +0.75R and ended at zero or worse. SE clustered by month.
+
+**Result** (2,866 trades, the same trades for every variant):
+
+| Variant | Net mean R (clustered SE) | Difference from V0 (SE) | Win rate | Good gain to nothing |
+|---|---|---|---|---|
+| V0 fixed | -0.023 (0.028) | | 46% | 17% |
+| V1 breakeven at +1R | -0.026 | -0.002 (0.004) | 43% | 24% |
+| V2 breakeven at +0.75R | -0.031 | -0.008 (0.007) | 40% | 31% |
+| V3 19 Nov rule | -0.034 (0.022) | -0.010 (0.012) | 44% | 5% |
+| V4 lock half | -0.036 (0.022) | -0.013 (0.012) | 55% | 5% |
+| V5 wide trail | -0.032 | -0.008 (0.006) | 48% | 14% |
+| V6 19 Nov rule, no target, 10 sessions | -0.029 | -0.006 (0.014) | 44% | 6% |
+
+Halves: V0 -0.008 (2016 to 2020) and -0.037 (2021 on); V3 +0.005 and -0.070. Among trades that reached +1R, the R given back from the best was about 0.5R for V0 to V5 and 0.79R for V6.
+
+**Reading.** (1) The stop rule barely changes the money: every difference from the fixed stop is about 0.01R a trade or less and inside its noise. Stops change the shape of the results, not the total. (2) Breakeven-only rules (V1, V2, what we ran until 19 Nov) were the worst for the user's caveat: a good trade often ends at zero, which after costs is a small loss (24 to 31%). (3) Locking real profit (V3, V4) cuts good gain to nothing to 5% at a cost of about 0.01R a trade, not distinguishable from zero. So the 19 Nov rule plus the giving-back-profit flag stays. (4) **The trend breakout entries themselves show no edge**: -0.02R a trade (SE 0.03) over about 2,900 trades and ten years, in line with the US 500 technical test. No stop rule can turn a no-edge entry into a profitable one; the entries, not the exits, decide whether the challenge can make money. Limits: Yahoo prices are not IG's instruments, daily bars cannot show the order of moves within a day and the test trails once a day (live checks are more frequent), the 0.05R cost is an assumption, and the user's IG client sentiment filter was not applied (no history). One run, nothing tuned; any variant needs a new pre-registration.
+
 ## Why swing trading (decided, do not reopen)
 
 - Scalping: the spread is 10 to 30% of a typical target, so costs dominate.
