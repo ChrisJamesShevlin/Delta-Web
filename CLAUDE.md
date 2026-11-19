@@ -444,3 +444,18 @@ Limits: model prices, not IG's real historical quotes; daily closes only (intrad
 ## Pre-registration: covered calls and the wheel on IG's US 500 (written 2026-11-19, BEFORE the run)
 
 The user asked for two more tests on the IG account: a covered call, and the wheel (sell puts; if "assigned", hold the index and sell calls until "called away"). Rules in the docstring of `ig_swing/options_test2.py`, committed before the run: long leg = US 500 quarterly future (no funding, 0.013% spread, quarterly roll), options as test 1, monthly about 35 days out held to settlement; strategies L0 (long future, the benchmark), CC30 and CC16 (covered calls at 30 and 16 delta), WH (the wheel, 30-delta puts and calls, calls not below the assignment strike, assignment mimicked by buying or selling the future at the settlement day's close). Measured on each month's profit divided by the index level. Bars against L0, both needed: (1) higher return per unit of risk at 1x and 1.5x all spreads; (2) smaller worst cumulative fall. Variants 8 to 10. Run once.
+
+### Result of the covered call and wheel test (run once on 2026-11-19, nothing changed): all three PASS the bars, two of them fragile
+
+2008-01-02 to 2026-10-30, returns over cash on a position the size of the index (each month's profit divided by the index level), IG costs, model option prices.
+
+| | Strategy | Return a year | Volatility | Risk ratio | Worst cumulative fall | 2008 | Mar 2020 | 2022 | Verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| L0 | Long US 500 future (benchmark) | 10.4% | 15.6% | 0.67 | 60.1% | -38.9% | -12.5% | -19.0% | |
+| CC30 | Covered call, 30 delta | 10.1% | 13.3% | 0.76 | 46.6% | -26.4% | -15.4% | -13.6% | PASS, fragile |
+| CC16 | Covered call, 16 delta | 10.8% | 14.5% | 0.74 | 54.6% | -33.6% | -13.9% | -17.6% | PASS, fragile |
+| WH | The wheel | 9.7% | 12.6% | 0.78 | 59.6% | -34.3% | -7.8% | +3.2% | PASS (bar 2 by 0.5 points) |
+
+At 1.5x all spreads the ratios are 0.73, 0.73 and 0.76 against 0.67. Fragile: at double the skew the covered calls' ratios fall to 0.63 and 0.60, below L0; the wheel improves with more skew (0.72 / 0.78 / 0.83). The wheel was assigned and called away 21 times each and held the long 43% of days. The 1990 VIX-only look (descriptive) points the same way: ratios 0.69, 0.64, 0.66 against 0.57, with smaller falls.
+
+Reading: the overlays give about the same return as holding the US 500 with a smoother ride (risk ratio about 0.75 against 0.67), not a higher return; the wheel's worst fall is essentially the same as holding. That matches the published covered-call record. It is in-sample, model-priced (the at-the-money volatility is assumed to be 0.90 x the VIX, which sets the premium earned and was not varied), daily closes only, 10 variants tried in all, and no significance is claimed. Under the scope, passing strategies go to a forward shadow book on IG's live quotes before any money. Practical size: the margin-only account figures (£630 to £800 at £1 a point) mean about nine times leverage; an unleveraged version at £1 a point needs about the index's notional, roughly £7,300.
