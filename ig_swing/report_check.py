@@ -118,11 +118,13 @@ def scan_html(rows: list[dict]) -> str:
 
 
 def capacity_html(equity: float, available: float | None, open_risk: float, new_risk: float, lim: Any, peak: float | None, dod: float | None, cooldown: str) -> str:
-    cap = equity * lim.max_total_open_risk_pct / 100
+    to_floor = getattr(lim, "total_risk_to_floor", False)
+    cap = max(0.0, equity - lim.min_equity_gbp) if to_floor else equity * lim.max_total_open_risk_pct / 100
+    cap_desc = f"everything above the £{lim.min_equity_gbp:.0f} floor" if to_floor else f"{lim.max_total_open_risk_pct:.0f}% of equity"
     used, free = max(0.0, open_risk), max(0.0, cap - open_risk)
     pct = lambda x: 100 * x / cap if cap else 0
     bar = (f'<div class=bar style="background:#2b313c"><i style="width:{pct(used):.0f}%;background:{AMBER}"></i></div>'
-           f'<div class=sub>Open stop risk £{used:.2f} of the £{cap:.2f} limit ({lim.max_total_open_risk_pct:.0f}% of equity); £{free:.2f} of headroom'
+           f'<div class=sub>Open stop risk £{used:.2f} of the £{cap:.2f} limit ({cap_desc}); £{free:.2f} of headroom'
            f'{f", and the trade placed this check accounts for £{new_risk:.2f} of it" if new_risk else ""}.</div>')
     dd = f"{100 * (peak - equity) / peak:.1f}% below its peak (brake at {lim.drawdown_brake_pct:.0f}%)" if peak else "no peak recorded"
     rows = [("Equity", f"£{equity:.2f} ({equity - START_EQUITY:+.2f} vs the £{START_EQUITY:.0f} start)"),

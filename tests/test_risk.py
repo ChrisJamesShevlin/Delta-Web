@@ -234,6 +234,20 @@ def test_total_open_risk_cap(tmp_path):
     assert not d.allowed and any("total open risk" in r for r in d.reasons)
 
 
+def test_total_open_risk_can_use_everything_above_the_floor(tmp_path):
+    base = dict(name="t", risk_per_trade_pct=5, max_risk_per_trade_pct=5, daily_loss_limit_pct=90, weekly_loss_limit_pct=90,
+                max_open_positions=50, max_total_open_risk_pct=5, min_equity_gbp=15.0, total_risk_to_floor=True)
+    e = RiskEngine(LIVE_TEST.__class__(**base), KillSwitch(tmp_path / "ks.json"))
+    # £1.00 already open; the % cap alone (£1.50 on £30) would refuse a £1.00 trade, the floor rule allows £15 in all
+    open_pos = [pos("A", epic="OTHER", size=0.01, level=7600, stop=7500)]
+    d = e.evaluate_entry(proposal(stop=100), acct(30), open_pos, [], NOW)
+    assert not any("total open risk" in r for r in d.reasons)
+    # with £14.50 already open, another £1.00 would take the stops below the £15 floor
+    big = [pos("A", epic="OTHER", size=0.145, level=7600, stop=7500)]
+    d2 = e.evaluate_entry(proposal(stop=100), acct(30), big, [], NOW)
+    assert any("above the £15.00 floor" in r for r in d2.reasons)
+
+
 def test_stop_below_market_minimum_and_bad_direction_refused(tmp_path):
     e = engine(tmp_path)
     assert any("below the market minimum" in r for r in e.evaluate_entry(proposal(stop=0.5), acct(), [], [], NOW).reasons)

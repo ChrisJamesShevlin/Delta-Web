@@ -34,6 +34,7 @@ class RiskLimits:
     drawdown_brake_pct: float = 0.0        # when equity is this far below its peak, stakes are scaled down ...
     drawdown_brake_factor: float = 0.5     # ... by this factor (0 pct = no brake)
     max_new_trades_per_day: int = 0        # new entries allowed per UTC day (0 = no limit)
+    total_risk_to_floor: bool = False      # if True, total open risk may use everything above min_equity_gbp instead of the % cap
 
 
 AGREED = RiskLimits()
@@ -61,7 +62,8 @@ CHALLENGE = RiskLimits(
     daily_loss_limit_pct=25.0,
     weekly_loss_limit_pct=40.0,
     max_open_positions=50,                 # effectively no count cap (user, 2026-11-13; was 2). Total open risk and margin are the real limits
-    max_total_open_risk_pct=40.0,          # two full-size trades (user, 2026-11-13); was 20%
+    max_total_open_risk_pct=40.0,          # not used while total_risk_to_floor is on; was the cap 2026-11-13 to 2026-11-19
+    total_risk_to_floor=True,              # user go 2026-11-19: all open stops together may risk everything above the £15 floor
     min_equity_gbp=15.0,
     cooldown_losses=2,
     cooldown_hours=24.0,

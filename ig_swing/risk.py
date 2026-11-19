@@ -353,11 +353,14 @@ class RiskEngine:
         if not size.allowed:
             reasons.append(size.reason)
         else:
-            total_cap = account.equity * self.limits.max_total_open_risk_pct / 100
+            if self.limits.total_risk_to_floor:
+                total_cap = max(0.0, account.equity - self.limits.min_equity_gbp)
+                cap_text = f"the amount above the £{self.limits.min_equity_gbp:.2f} floor (£{total_cap:.2f})"
+            else:
+                total_cap = account.equity * self.limits.max_total_open_risk_pct / 100
+                cap_text = f"the {self.limits.max_total_open_risk_pct}% cap (£{total_cap:.2f})"
             if open_gbp + size.risk_gbp > total_cap + 1e-9:
-                reasons.append(
-                    f"total open risk £{open_gbp + size.risk_gbp:.2f} would exceed the {self.limits.max_total_open_risk_pct}% cap (£{total_cap:.2f})"
-                )
+                reasons.append(f"total open risk £{open_gbp + size.risk_gbp:.2f} would exceed {cap_text}")
 
         for e in blocking_events(events, now, self.event_rules):
             when = f"{e.time_utc:%a %d %b %H:%M}Z" if e.time_utc else f"{e.day:%a %d %b} (time n/a)"
