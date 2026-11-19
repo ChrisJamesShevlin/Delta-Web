@@ -408,6 +408,7 @@ Salvageable ideas from the old `API_Trader/main.py` (read the logic, do not copy
 
 - **Confirm before running anything** that trades, places orders, spends money, or writes outside this repo. "Check X" means read-only.
 - **No unasked changes.** Diagnose, explain, then wait for an explicit go before editing, restarting or pushing.
+- **NEVER change anything that could affect how we trade without telling the user first and getting a go (user, 2026-11-19, repeated in capitals).** This includes my own judgement: win-chance estimates, how setups are read, filters, thresholds, sizing, exits, which ideas go live. If I think something should shift, say so and wait. If live trades stop happening, say why at once.
 - **Never place a live order.** Demo only unless the user explicitly switches it.
 - **Verify before asserting.** Read the code before claiming what it does. Say "untested" rather than guess.
 - Commit verified work promptly with clear messages. Do not push without the user's go.

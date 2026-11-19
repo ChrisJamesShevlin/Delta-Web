@@ -159,6 +159,7 @@ Say what you saw, what you recorded, what (if anything) is proposed live, and wh
 - **Back up the journal at the end of every check and session:** `python3 -m ig_swing.backup export --commit --push`. It writes plain text files to the backup folder, pushed to the `journal-backup` branch (never main) (`$IG_BACKUP_DIR`, default `../IG-Swing-backup`), never to this repo's working tree. If it says there is no remote, tell the user once; the backup is then local only. Restore on a new laptop with `python3 -m ig_swing.backup restore`.
 
 ## Never
+- Change anything that could affect how we trade (win-chance estimates, how setups are read, filters, thresholds, sizing, exits, which ideas go live) without telling the user first and getting a go (user, 2026-11-19). Raise it if live trades stop happening.
 - Place an order outside the conditions in step 4, with `--ignore-kelly`, when the profile is not `challenge`, or on any account other than the challenge account.
 - Change the risk caps, the floor, the cooldown, the Kelly fraction or any limit, or use `--ignore-kelly`, unless the user explicitly asks.
 - Remove or widen a stop, add to a position, or average down.
