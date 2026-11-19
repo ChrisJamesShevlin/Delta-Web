@@ -73,7 +73,7 @@ def exposure_html(b: dict[str, Any]) -> str:
             f'<tr><td>Dollar-and-yields group (assumed link: dollar, minus precious metals)</td><td class=n>{money(b["dollar_group"])}</td></tr>{rows}</table>')
 
 
-def trade_card(idea: dict, trade: dict | None, pos: Any, equity: float, margin_pct: float | None) -> str:
+def trade_card(idea: dict, trade: dict | None, pos: Any, equity: float, margin_pct: float | None, chart: bool = True) -> str:
     sign = 1 if idea["direction"] == "BUY" else -1
     entry = trade["entry"] if trade and trade.get("entry") else idea["entry"]
     stop_pts, tgt_pts = idea["stop_pts"], idea["target_pts"]
@@ -92,7 +92,7 @@ def trade_card(idea: dict, trade: dict | None, pos: Any, equity: float, margin_p
              f"win chance stated {p:.0%} (not shown, a prior)", f"expected {expected_r(p, rr):+.2f}R per trade after an assumed {COST_R}R cost",
              f"break-even win rate {100 * (1 + COST_R) / (1 + rr):.0f}% at {rr:.1f} to 1"]
     return (f'<div class=card><div class=hd><b>{idea["direction"]} {html.escape(idea["market"])} <span class=tag>{status}</span></b><span>{rr:.1f} to 1 · {idea["confidence"]} · {html.escape(idea["playbook"])}</span></div>'
-            f'{ladder_svg(lv)}<div class=sub>entry {entry:g} · stop {stop_lv:g} ({stop_pts:g} pts) · target {tgt_lv:g} ({tgt_pts:g} pts)</div>'
+            f'{ladder_svg(lv) if chart else ""}<div class=sub>entry {entry:g} · stop {stop_lv:g} ({stop_pts:g} pts) · target {tgt_lv:g} ({tgt_pts:g} pts)</div>'
             f'<div class=sub>{" · ".join(cells)}</div><div class=sub style="color:{FG};margin-top:6px">{html.escape(idea["thesis"])}</div></div>')
 
 
@@ -167,7 +167,7 @@ def build(ctx: dict, verdict: str, text: str, now: datetime) -> str:
         sections.append(f'<h2>Open positions: where each one is and what its stop keeps</h2><div class=sub>{LADDER_NOTE}</div>' + "".join(ctx["position_cards"]))
     closed_note = (f'<div class=sub>Opened and closed again since the last check, not open now: {html.escape("; ".join(ctx["closed_in_window"]))}.</div>'
                    if ctx.get("closed_in_window") else "")
-    sections.append("<h2>New trades this check (still open; their positions also appear above)</h2>" + closed_note
+    sections.append("<h2>New trades this check (details; each one's chart is in Open positions above)</h2>" + closed_note
                     + ("".join(c["html"] for c in ctx["cards"]) or '<div class=sub>No new trade was placed this check.</div>'))
     sections.append(f'<h2>How the whole book sits</h2>{ctx["exposure"]}')
     if ctx.get("equity_days") is not None:
@@ -242,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
             margin_pct = resolve_market(client, i["epic"] if i.get("epic") else i["market"])["margin"]
         except Exception:
             margin_pct = None
-        card = trade_card(i, trade, by_deal.get(deal), equity, margin_pct)
+        card = trade_card(i, trade, by_deal.get(deal), equity, margin_pct, chart=deal not in by_deal)   # an open position is drawn once, above
         cards.append({"live": bool(trade), "html": card})
         new_risk += (trade or {}).get("risk_gbp") or 0.0
     rows = [{"market": p.instrument_name, "direction": p.direction, "notional": p.size * (p.bid or p.open_level)} for p in positions]
