@@ -26,7 +26,7 @@ The separate positions-only "health check" is gone: on 19 Nov it spotted natural
 3. **The written review of every open position** (`manage review`, section 0a), then do what each verdict says.
 4. **The full briefing** (`challenge brief`, section 1) and `quick` on US 500 and US Tech 100.
 5. **The near-the-edge list** (section 2b): every market beyond its 20-day range AND every market within 0.25 ATR of its 20-day high or low. Name each one in the reply; the ones near the edge are re-checked at the next check.
-6. **Research pass** (section 1b): at least three searches.
+6. **Research pass** (section 1b): at least three searches, PLUS one fixed search beyond the list every check (user go, 2026-11-19): a WebSearch for today's biggest movers (US and UK stocks, commodities, currencies, anything with a sharp move or big news). For each one that is not on the briefing list and looks like a trigger, run `challenge find` and `challenge quick` (any IG daily bet works); name the ones checked in the reply, with "none found" when there are none. `challenge movers` does NOT do this: it only ranks the same list against stored bars. If the search returns nothing dated today, say so.
 7. **Ideas** (section 3) for every trigger and anything seriously considered; at most one live order (section 4), with `--exit-line`.
 8. **Journal notes** for every market looked at, the **report page** (`report_check`, section 5), then the **backup**.
 9. **The reply** in the order of section 5, with the IG allowance left and the points this check used.
