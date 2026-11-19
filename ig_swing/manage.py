@@ -8,6 +8,9 @@
   python3 -m ig_swing.manage trail [--execute]          the mechanical rule: stop to breakeven at +0.75R, to +1R at +2R (skips positions IG is trailing)
   python3 -m ig_swing.manage history                    closed trades by exit reason: does cutting early help?
   python3 -m ig_swing.manage reconcile [--execute]      record trades IG closed on its own in the journal (journal only, no order)
+  python3 -m ig_swing.manage exitline --deal-id D1 --level L --why "..."     store the price that breaks the reason for the trade (journal only)
+  python3 -m ig_swing.manage review --deal-id D1 --news ... --thesis intact|weakened|broken --events ... --would-open yes|smaller|no
+                                    --verdict hold|tighten|close --why ... --source ...   the written re-decision, every check (journal only)
 
 Every changing command is a DRY RUN unless --execute is given AND IG_LIVE_ORDERS=yes is set AND the challenge risk profile is active.
 The assistant runs these unprompted under the user's standing authorisation (2026-11-11): closing a position in profit or in loss,
@@ -295,6 +298,20 @@ def main(argv: list[str] | None = None) -> int:
     lm.add_argument("--level", type=float, required=True)
     lm.add_argument("--why", required=True, help="what you saw that justifies moving the take-profit")
     lm.add_argument("--execute", action="store_true")
+    el = sub.add_parser("exitline", help="store the price at which the reason for the trade is broken (journal only)")
+    el.add_argument("--deal-id", required=True)
+    el.add_argument("--level", type=float, required=True)
+    el.add_argument("--why", required=True, help="what the line is, e.g. 'old 20-day low the breakdown went through'")
+    rv = sub.add_parser("review", help="the written re-decision of one open position, every check (journal only; refuses inconsistent answers)")
+    rv.add_argument("--deal-id", required=True)
+    rv.add_argument("--news", required=True, help="news on this market since entry, and on the risk named at entry")
+    rv.add_argument("--thesis", required=True, choices=("intact", "weakened", "broken"), help="is the reason for the trade still working")
+    rv.add_argument("--events", required=True, help="what is due before the next check (data, speeches, the weekend)")
+    rv.add_argument("--would-open", required=True, choices=("yes", "smaller", "no"), help="would I open this trade now, at this price, knowing what I know")
+    rv.add_argument("--verdict", required=True, choices=("hold", "tighten", "close"))
+    rv.add_argument("--why", required=True)
+    rv.add_argument("--source", action="append", default=[], help="repeatable")
+    rv.add_argument("--override", default="", help="only to hold through a crossed exit line, with the reason (e.g. waiting for the daily close)")
     args = ap.parse_args(argv)
 
     from .config import base_url, ig_env, load_credentials, risk_limits
@@ -324,15 +341,51 @@ def main(argv: list[str] | None = None) -> int:
             from .themes import book_view, rows_from_positions
             print("\n".join(book_view(rows_from_positions(positions), client.get_account(creds.account_id).equity)))
             return 0
+        if args.cmd in ("list", "exitline", "review"):
+            from datetime import timedelta
+            from .review import atr_by_epic, exit_line_record, exit_lines, exit_status, flags, latest_reviews, review_line, review_record, validate_review
+            evs = journal.events()
+            lines, reviews = exit_lines(evs), latest_reviews(evs)
+            atrs = atr_by_epic(journal.latest_snapshots((now - timedelta(days=7)).isoformat()))
+        if args.cmd == "exitline":
+            pos = _find(positions, args.deal_id)
+            rec = exit_line_record(pos.deal_id, pos.direction, args.level, args.why)
+            journal.record_event(now.isoformat(), "exit_line", json.dumps(rec))
+            print(f"EXIT LINE RECORDED: {pos.instrument_name} [{pos.deal_id}] {pos.direction}: the reason for the trade is broken {rec['side']} {rec['level']:g} ({rec['why']})")
+            return 0
+        if args.cmd == "review":
+            pos = _find(positions, args.deal_id)
+            price = pos.offer if pos.direction == "SELL" else pos.bid
+            line = lines.get(pos.deal_id)
+            state, text = exit_status(pos.direction, price, line["level"] if line else None, atrs.get(pos.epic))
+            bad = validate_review(args.thesis, args.would_open, args.verdict, state, args.news, args.events, args.why, args.source, args.override)
+            if bad:
+                print("REVIEW REFUSED:\n  " + "\n  ".join(bad))
+                return 1
+            m_ = move_in_r(pos, initial_risk_points(pos, open_trades.get(pos.deal_id)))
+            rec = review_record(pos.deal_id, pos.instrument_name, m_, text, args.thesis, args.would_open, args.verdict, args.news, args.events, args.why, args.source, args.override)
+            journal.record_event(now.isoformat(), "position_review", json.dumps(rec))
+            print(f"REVIEW RECORDED: {pos.instrument_name} [{pos.deal_id}]: {args.verdict.upper()} ({text})")
+            if args.verdict != "hold":
+                print(f"  The verdict is {args.verdict}: do it now with `manage {'close' if args.verdict == 'close' else 'stop'}` and tell the user.")
+            return 0
         if args.cmd == "list":
             if not positions:
                 print("No open positions.")
+            attention = []
             for p in positions:
                 tr_ = open_trades.get(p.deal_id)
                 print(describe(p, tr_))
+                price = p.offer if p.direction == "SELL" else p.bid
+                line = lines.get(p.deal_id)
+                print("    " + exit_status(p.direction, price, line["level"] if line else None, atrs.get(p.epic))[1])
+                print("    " + review_line(reviews.get(p.deal_id), now))
+                attention += [f"{p.instrument_name}: {f}" for f in flags(p.direction, p.deal_id, price, lines, reviews, atrs.get(p.epic), now)]
                 m_ = move_in_r(p, initial_risk_points(p, tr_))
                 if m_ is not None:                                                  # a coarse record of how far each trade has run, for later review
                     journal.record_event(now.isoformat(), "position_check", json.dumps({"deal_id": p.deal_id, "r": round(m_, 3)}))
+            if attention:
+                print("ATTENTION (deal with these first and raise them with the user at the top of the reply):\n  " + "\n  ".join(attention))
             return 0
         if args.cmd == "reconcile":
             since = min((_utc(t["opened_at"]) for t in open_trades.values()), default=None)

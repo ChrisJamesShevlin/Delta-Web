@@ -157,6 +157,8 @@ def build(ctx: dict, verdict: str, text: str, now: datetime) -> str:
                 f'<div><span class=sub>Placed this check</span><b>{len(live)}</b><span class=sub>{len(ctx["cards"]) - len(live)} proposed only</span></div>'
                 f'<div><span class=sub>Ideas recorded</span><b>{len(ctx["ideas"])}</b><span class=sub>{ctx["total_ideas"]} in all</span></div></div>',
                 f'<h2>What we can use</h2>{ctx["capacity"]}']
+    if ctx.get("reviews"):
+        sections.append(f'<h2>Open positions: exit line and would I open it now</h2>{ctx["reviews"]}')
     sections.append("<h2>Trades this check</h2>" + ("".join(c["html"] for c in ctx["cards"]) or '<div class=sub>No order was placed or proposed live this check.</div>'))
     sections.append(f'<h2>How the whole book sits</h2>{ctx["exposure"]}')
     rows = "".join(f'<tr><td>{html.escape(i["market"])}</td><td>{i["direction"]}</td><td>{i["confidence"]}</td><td class=n>{i["p_win"]:.0%}</td><td>{"live" if i.get("live") else "shadow"}</td>'
@@ -247,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
                 ("Reading", "far too few finished results to judge any playbook or my stated probabilities; run `challenge review` for the comparison with the baseline")]
     ctx = {"equity": equity, "cards": cards, "ideas": ideas, "total_ideas": len(all_ideas), "capacity": cap_html, "exposure": exposure_html(book_exposure(rows, equity)),
            "backdrop": backdrop, "scan": scan, "events": upcoming, "learning": learning}
+    from .report_html import reviews_section
+    ctx["reviews"] = reviews_section(journal, positions, now)
     page = build(ctx, args.verdict, Path(args.text_file).read_text(), now)
     REPORTS.mkdir(exist_ok=True)
     path = REPORTS / f"{now:%Y-%m-%d_%H%M}_market.html"

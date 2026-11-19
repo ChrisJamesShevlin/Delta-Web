@@ -107,7 +107,7 @@ CSS = (f"body{{background:#14181f;color:{FG};font:15px system-ui;max-width:700px
 
 
 def build(positions: list, trades: dict, equity: float, equity_days: list[tuple[str, float]], checks: dict, events: list,
-          verdict: str, text: str, now: datetime) -> str:
+          verdict: str, text: str, now: datetime, reviews_html: str = "") -> str:
     from .manage import initial_risk_points, move_in_r
     cards, tot_pl, tot_risk = [], 0.0, 0.0
     for p in positions:
@@ -136,10 +136,19 @@ def build(positions: list, trades: dict, equity: float, equity_days: list[tuple[
             f'<div class=k><div><span class=sub>Equity</span><b>£{equity:.2f}</b><span class=sub>{equity - START_EQUITY:+.2f} vs £{START_EQUITY:.0f} start</span></div>'
             f'<div><span class=sub>Open profit</span><b style="color:{GREEN if tot_pl >= 0 else RED}">£{tot_pl:+.2f}</b><span class=sub>{len(positions)} positions</span></div>'
             f'<div><span class=sub>Worst case, all stops hit</span><b style="color:{RED if tot_risk < 0 else GREEN}">£{tot_risk:+.2f}</b><span class=sub>{abs(tot_risk) / equity * 100:.0f}% of equity (limit 40%)</span></div></div>'
+            + (f'<h2>Position reviews: exit line and would I open it now</h2>{reviews_html}' if reviews_html else '') +
             f'<h2>Where each trade is</h2><div class=sub>Distance in R (1R = the risk taken at entry). The dot is now; right is profit. Red is loss, green is the way to target.</div>{"".join(cards)}'
             f'<h2>Profit and loss against the £{START_EQUITY:.0f} start</h2><div class=sub>The £15 test deposit before 12 Nov is left out.</div>{equity_svg(eq_pts)}'
             f'<h2>Next 26 hours: high-impact releases</h2><table><tr><th>When</th><th>Release</th><th>Forecast</th><th>Affects</th></tr>{release_rows(events)}</table>'
             f'{text_sections(text)}<p class=sub>No edge is shown. Results this small are noise.</p>')
+
+
+def reviews_section(journal, positions: list, now: datetime) -> str:
+    """The position review table, shared with the market check page."""
+    from .review import atr_by_epic, exit_lines, latest_reviews, summary_html, summary_rows
+    evs = journal.events()
+    atrs = atr_by_epic(journal.latest_snapshots((now - timedelta(days=7)).isoformat()))
+    return summary_html(summary_rows(positions, exit_lines(evs), latest_reviews(evs), atrs, now), now)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -171,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             checks.setdefault(d["deal_id"], []).append((datetime.fromisoformat(ts), d["r"]))
     evs, _ = load_events(requests.Session(), now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"), world=True)
     upcoming = [e for e in events_within(evs, now, 26) if e.time_utc]
-    page = build(positions, trades, equity, days, checks, upcoming, args.verdict, Path(args.text_file).read_text(), now)
+    page = build(positions, trades, equity, days, checks, upcoming, args.verdict, Path(args.text_file).read_text(), now, reviews_section(journal, positions, now))
     REPORTS.mkdir(exist_ok=True)
     path = REPORTS / f"{now:%Y-%m-%d_%H%M}_health.html"
     path.write_text(page)

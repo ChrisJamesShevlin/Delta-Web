@@ -76,6 +76,15 @@ def plan_order(client: Any, journal: Any, engine: RiskEngine, market: str, direc
     }
 
 
+def exit_line_problem(direction: str, entry: float, stop_pts: float, line: float) -> str:
+    """The exit line must lie between the entry and the stop: beyond the entry on the losing side, and before the stop."""
+    stop_level = entry + stop_pts if direction.upper() == "SELL" else entry - stop_pts
+    lo, hi = sorted((entry, stop_level))
+    if not lo < line < hi:
+        return f"the exit line {line:g} must lie between the entry ({entry:g}) and the stop ({stop_level:g})"
+    return ""
+
+
 def describe(plan: dict[str, Any], equity: float) -> str:
     d = plan["decision"]
     lines = [
@@ -94,7 +103,7 @@ def describe(plan: dict[str, Any], equity: float) -> str:
 
 
 def execute(client: Any, journal: Any, engine: RiskEngine, plan: dict[str, Any], account: AccountState, now: datetime, token: str | None,
-            thesis: str, playbook: str, env: str = "live") -> dict[str, Any]:
+            thesis: str, playbook: str, env: str = "live", exit_line: float | None = None) -> dict[str, Any]:
     """Place the order only if the token matches the exact plan. The confirmation callback is the token check."""
     if not plan["allowed"] or not plan["token"]:
         return {"placed": False, "status": "not allowed by the risk rules"}
@@ -105,8 +114,11 @@ def execute(client: Any, journal: Any, engine: RiskEngine, plan: dict[str, Any],
     res = svc.submit_entry(
         epic=plan["epic"], expiry="DFB", market=plan["market"], direction=plan["direction"], stop_distance=plan["stop"], target_distance=plan["target"],
         setup=playbook, account=account, events=[], now=now, context=ContextVerdict(plan["direction"], size_factor=plan["size_factor"]), expect_size=plan["stake"],
-        driver="challenge", thesis=thesis, invalidation=f"stop {plan['stop']:g} points",
+        driver="challenge", thesis=thesis, invalidation=(f"exit line {exit_line:g}, " if exit_line is not None else "") + f"stop {plan['stop']:g} points",
     )
+    if res.placed and res.deal_id and exit_line is not None:
+        from .review import exit_line_record
+        journal.record_event(now.isoformat(), "exit_line", json.dumps(exit_line_record(res.deal_id, plan["direction"], exit_line, "set at entry")))
     return {"placed": res.placed, "status": res.status, "reasons": res.reasons, "deal_id": res.deal_id, "size": res.size, "stop_level": res.stop_level}
 
 
@@ -132,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--playbook", required=True, choices=PLAYBOOKS)
     ap.add_argument("--thesis", required=True)
     ap.add_argument("--idea-id", type=int, default=None)
+    ap.add_argument("--exit-line", type=float, required=True,
+                    help="the price at which the reason for the trade is broken (for a breakout, the old edge of the range); every check compares the price with it")
     ap.add_argument("--confirm", default=None, help="the token printed by the dry run, passed only after the user says yes to that exact order")
     ap.add_argument("--ignore-kelly", action="store_true")
     args = ap.parse_args(argv)
@@ -157,6 +171,10 @@ def main(argv: list[str] | None = None) -> int:
             calibrated = calibration(measure(ideas, lambda key: clean_daily(client.get_prices(key if looks_like_epic(key) else ALL_MARKETS[key][0], "DAY", 60), now))["finished"])["calibrated"]
         info = resolve_market(client, args.market)
         plan = plan_order(client, journal, engine, info["name"], args.direction, args.stop, args.target, args.p_win, account, now, calibrated, args.ignore_kelly, info)
+        line_problem = exit_line_problem(plan["direction"], plan["entry"], args.stop, args.exit_line)
+        if line_problem:
+            plan["reasons"].append(line_problem)
+            plan["allowed"] = False
         print(f"Environment {env.upper()}, risk profile {engine.limits.name}, live orders {'ENABLED' if live_ok else 'off'}")
         print(describe(plan, account.equity))
         if args.confirm is None:
@@ -172,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if args.ignore_kelly:
             journal.record_event(now.isoformat(), "kelly_override", json.dumps({"market": info["name"], "direction": args.direction, "p_win": args.p_win}))
-        res = execute(client, journal, engine, plan, account, now, args.confirm, args.thesis, args.playbook, env)
+        res = execute(client, journal, engine, plan, account, now, args.confirm, args.thesis, args.playbook, env, args.exit_line)
         if res["placed"] and args.idea_id:
             journal.record_event(now.isoformat(), "challenge_live", json.dumps({"idea_id": args.idea_id, "deal_id": res["deal_id"]}))
         print(("PLACED: " if res["placed"] else "NOT PLACED: ") + res["status"] + (f", deal {res['deal_id']}, stake £{res['size']}, stop level {res['stop_level']}" if res["placed"] else ""))
