@@ -59,34 +59,46 @@ def move_in_r(pos: Position, r_pts: float | None) -> float | None:
     return None
 
 
-BREAKEVEN_R = 0.75   # stop to breakeven once up this many R (was 1.0 until 2026-11-18, user go; see RULE_CHANGELOG.md)
+BREAKEVEN_R = 0.5    # stop to breakeven once up this many R (1.0 to 2026-11-18, 0.75 to 2026-11-19; user instruction, see RULE_CHANGELOG.md)
+LOCK_FROM_R = 0.75   # from here the stop locks profit: at least +0.25R, and it trails 0.75R behind the best price seen at a check
+LOCK_MIN_R = 0.25
+TRAIL_START_R = 0.5  # IG's own trailing stop goes on from here (was +1R; user instruction 2026-11-19: trail sooner)
+TRAIL_GAP_R = 0.75
+
+
+def locked_r(m: float) -> float | None:
+    """The profit, in R, the stop should lock for a trade up m R. None below the breakeven step."""
+    if m >= LOCK_FROM_R:
+        return max(LOCK_MIN_R, m - TRAIL_GAP_R)
+    if m >= BREAKEVEN_R:
+        return 0.0
+    return None
 
 
 def trail_target(pos: Position, r_pts: float | None) -> float | None:
-    """The mechanical stop: breakeven once up 0.75R, lock in 1R once up 2R. None unless it tightens the stop and is on the right side of price."""
+    """The mechanical stop (user instruction 2026-11-19): breakeven at +0.5R; from +0.75R lock at least +0.25R and trail 0.75R behind
+    the price. Ratchets at every check. None unless it tightens the stop and is on the right side of price."""
     m = move_in_r(pos, r_pts)
     if m is None or pos.stop_level is None or not r_pts:
         return None
     buy = pos.direction == "BUY"
-    if m >= 2:
-        new = pos.open_level + r_pts if buy else pos.open_level - r_pts
-    elif m >= BREAKEVEN_R:
-        new = pos.open_level
-    else:
+    lock = locked_r(m)
+    if lock is None:
         return None
+    new = round(pos.open_level + lock * r_pts if buy else pos.open_level - lock * r_pts, 2)
     tighter = new > pos.stop_level if buy else new < pos.stop_level
     valid = (pos.bid is not None and new < pos.bid) if buy else (pos.offer is not None and new > pos.offer)
     return new if tighter and valid else None
 
 
 def native_trailing_plan(pos: Position, r_pts: float | None, min_stop: float = 0.0) -> tuple[float, float, float] | None:
-    """When a position is up 1R or more and IG is not yet trailing it: (stop level, trailing distance, step).
+    """When a position is up TRAIL_START_R (0.5R) or more and IG is not yet trailing it: (stop level, trailing distance, step).
 
     The stop goes to breakeven if that tightens it, and the trailing distance is the gap from the price to that stop, so IG trailing at
     that distance can never put the stop further away than it is now. None if not up 1R, already trailing, or the gap is too small.
     """
     m = move_in_r(pos, r_pts)
-    if m is None or m < 1 or pos.stop_level is None or pos.trailing_distance:
+    if m is None or m < TRAIL_START_R or pos.stop_level is None or pos.trailing_distance:
         return None
     buy = pos.direction == "BUY"
     price = pos.bid if buy else pos.offer
@@ -289,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     nt.add_argument("--decision", required=True)
     rc = sub.add_parser("reconcile", help="record trades IG closed on its own (stop or take-profit) in the journal; changes the journal only, places nothing")
     rc.add_argument("--execute", action="store_true")
-    tr = sub.add_parser("trailing", help="switch a winning position (up 1R or more) to an IG trailing stop")
+    tr = sub.add_parser("trailing", help="switch a winning position (up 0.5R or more) to an IG trailing stop")
     tr.add_argument("--deal-id", required=True)
     tr.add_argument("--why", required=True, help="what you saw that justifies the trailing stop")
     tr.add_argument("--execute", action="store_true")
@@ -448,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
             min_stop = client.get_market_rules(pos.epic).min_stop_distance
             plan = native_trailing_plan(pos, initial_risk_points(pos, tr_), min_stop)
             if plan is None:
-                print(f"No trailing stop to set on {describe(pos, tr_)}\n  (it needs to be up at least 1R, not already trailing, and have room above the market minimum)")
+                print(f"No trailing stop to set on {describe(pos, tr_)}\n  (it needs to be up at least 0.5R, not already trailing, and have room above the market minimum)")
                 return 0
             stop, distance, step = plan
             print(f"{mode}: trailing stop on {describe(pos, tr_)}\n  stop to {stop:g}, trailing distance {distance:g} points, step {step:g} points")

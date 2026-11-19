@@ -37,18 +37,20 @@ def test_move_in_r_for_long_and_short_in_favour_and_against():
     assert mg.move_in_r(s, 100.0) == pytest.approx(1.0) and mg.move_in_r(s, None) is None
 
 
-def test_trail_rule_breakeven_at_one_r_lock_one_r_at_two_and_never_loosens():
-    assert mg.trail_target(pos(bid=11050.0), 100.0) is None                                        # only +0.5R
-    assert mg.trail_target(pos(bid=11075.0), 100.0) == 11000.0                                     # +0.75R: stop to breakeven
-    assert mg.trail_target(pos(bid=11074.0), 100.0) is None                                        # just under +0.75R
-    assert mg.trail_target(pos(bid=11100.0), 100.0) == 11000.0                                     # +1R: stop to breakeven
-    assert mg.trail_target(pos(bid=11200.0), 100.0) == 11100.0                                     # +2R: lock in 1R
-    assert mg.trail_target(pos(bid=11100.0, stop=11000.0), 100.0) is None                          # already at breakeven: nothing to do
+def test_trail_rule_breakeven_at_half_r_then_locks_profit_and_never_loosens():
+    # entry 11000, 1R = 100 points (user instruction 2026-11-19)
+    assert mg.trail_target(pos(bid=11049.0), 100.0) is None                                        # under +0.5R
+    assert mg.trail_target(pos(bid=11050.0), 100.0) == 11000.0                                     # +0.5R: stop to breakeven
+    assert mg.trail_target(pos(bid=11075.0), 100.0) == 11025.0                                     # +0.75R: lock +0.25R
+    assert mg.trail_target(pos(bid=11100.0), 100.0) == 11025.0                                     # +1R: still +0.25R (1 - 0.75)
+    assert mg.trail_target(pos(bid=11200.0), 100.0) == 11125.0                                     # +2R: trails 0.75R behind, locks +1.25R
+    assert mg.trail_target(pos(bid=11100.0, stop=11025.0), 100.0) is None                          # already there: nothing to do
     assert mg.trail_target(pos(bid=11200.0, stop=11150.0), 100.0) is None                          # the current stop is already tighter
     s = pos("SELL", 11000.0, 11100.0, 10800.0, bid=10899.0, offer=10900.0)
-    assert mg.trail_target(s, 100.0) == 11000.0
+    assert mg.trail_target(s, 100.0) == 10975.0                                                    # SELL +1R: lock +0.25R
     s2 = pos("SELL", 11000.0, 11100.0, 10800.0, bid=10799.0, offer=10800.0)
-    assert mg.trail_target(s2, 100.0) == 10900.0
+    assert mg.trail_target(s2, 100.0) == 10875.0                                                   # SELL +2R: lock +1.25R
+    assert mg.locked_r(0.4) is None and mg.locked_r(0.6) == 0.0 and mg.locked_r(3.0) == 2.25
     assert mg.trail_target(pos(stop=None, bid=11100.0), 100.0) is None                             # no stop: not this rule's job
 
 
@@ -182,7 +184,8 @@ def test_trailing_plan_needs_one_r_and_never_widens():
     # long from 11000, 100 points of initial risk, now 11100 (+1R) with the stop at 10900: stop to breakeven, trail the 100 point gap
     plan = mg.native_trailing_plan(pos(bid=11100.0), 100.0, min_stop=10.0)
     assert plan == (11000.0, 100.0, 20.0)
-    assert mg.native_trailing_plan(pos(bid=11050.0), 100.0) is None                                 # only +0.5R
+    assert mg.native_trailing_plan(pos(bid=11049.0), 100.0) is None                                 # under +0.5R
+    assert mg.native_trailing_plan(pos(bid=11050.0), 100.0) == (11000.0, 50.0, 10.0)                # +0.5R: trail from breakeven
     assert mg.native_trailing_plan(pos(bid=11200.0, stop=11100.0), 100.0) == (11100.0, 100.0, 20.0)  # the stop is already tighter: trail from there
     assert mg.native_trailing_plan(Position("D1", EPIC, "EUR/USD", "BUY", 0.01, 11000.0, 10900.0, 11200.0, 11100.0, 11101.0, 1.0, 100.0), 100.0) is None   # already trailing
     assert mg.native_trailing_plan(pos(bid=11100.0), 100.0, min_stop=150.0) is None                 # the gap is under the market minimum
