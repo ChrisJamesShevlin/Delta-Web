@@ -355,8 +355,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd in ("list", "exitline", "review"):
             from datetime import timedelta
-            from .review import atr_by_epic, exit_line_record, exit_lines, exit_status, flags, latest_reviews, review_line, review_record, validate_review
+            from .review import atr_by_epic, exit_line_record, exit_lines, exit_status, flags, giveback_flag, latest_reviews, peak_r, review_line, review_record, validate_review
             evs = journal.events()
+            peaks = peak_r(evs)
             lines, reviews = exit_lines(evs), latest_reviews(evs)
             atrs = atr_by_epic(journal.latest_snapshots((now - timedelta(days=7)).isoformat()))
         if args.cmd == "exitline":
@@ -394,6 +395,11 @@ def main(argv: list[str] | None = None) -> int:
                 print("    " + review_line(reviews.get(p.deal_id), now))
                 attention += [f"{p.instrument_name}: {f}" for f in flags(p.direction, p.deal_id, price, lines, reviews, atrs.get(p.epic), now)]
                 m_ = move_in_r(p, initial_risk_points(p, tr_))
+                gb = giveback_flag(peaks.get(p.deal_id), m_)
+                if peaks.get(p.deal_id) is not None:
+                    print(f"    best at a check: {peaks[p.deal_id]:+.2f}R")
+                if gb:
+                    attention.append(f"{p.instrument_name}: {gb}")
                 if m_ is not None:                                                  # a coarse record of how far each trade has run, for later review
                     journal.record_event(now.isoformat(), "position_check", json.dumps({"deal_id": p.deal_id, "r": round(m_, 3)}))
             if attention:

@@ -82,3 +82,25 @@ def test_place_exit_line_must_sit_between_entry_and_stop():
     assert exit_line_problem("SELL", 8258.7, 480, 8800)            # beyond the stop
     assert exit_line_problem("BUY", 100, 10, 95) == ""
     assert exit_line_problem("BUY", 100, 10, 101)
+
+
+def test_giveback_flag_and_peak():
+    from ig_swing.review import giveback_flag, peak_r
+    evs = [ev("position_check", {"deal_id": "D1", "r": 0.2}), ev("position_check", {"deal_id": "D1", "r": 0.77}), ev("position_check", {"deal_id": "D1", "r": 0.4})]
+    assert peak_r(evs)["D1"] == 0.77
+    assert giveback_flag(0.77, 0.38)                 # EUR/USD on 19 Nov: half handed back
+    assert not giveback_flag(0.77, 0.6)
+    assert not giveback_flag(0.4, -0.2)              # never well in profit: the exit line and stop cover it
+    assert not giveback_flag(None, 0.1)
+
+
+def test_newswatch_position_news_and_market_names():
+    from ig_swing.news import Headline
+    from ig_swing.newswatch import keyword_market, markets_named, position_news
+    assert keyword_market("Oil - US Crude") == "Crude oil" and keyword_market("Spot Silver") == "Silver"
+    opened = NOW - timedelta(days=2)
+    hs = [Headline("Silver slides as dollar firms", NOW - timedelta(hours=1), "X"), Headline("Silver bounces", NOW - timedelta(days=3), "X"),
+          Headline("Apple launches phone", NOW - timedelta(hours=1), "X")]
+    got = position_news("Spot Silver", opened, hs, NOW, last_review=NOW - timedelta(hours=2))
+    assert [h.title for h, _ in got] == ["Silver slides as dollar firms"] and got[0][1] is True
+    assert "Silver" in markets_named("Silver slides") and markets_named("The dollar and the Fed") == []

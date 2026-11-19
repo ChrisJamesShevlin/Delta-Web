@@ -133,6 +133,31 @@ def flags(direction: str, deal_id: str, price: float | None, lines: dict, review
     return out
 
 
+GIVEBACK_FROM_R = 0.5    # a trade that has been at least this far in profit ...
+GIVEBACK_SHARE = 0.5     # ... and has given back this share of its best level is flagged
+
+
+def peak_r(events: list[dict]) -> dict[str, float]:
+    """The best R each deal reached at any check (from `position_check` events). Checks are snapshots, so the true peak may be higher."""
+    out: dict[str, float] = {}
+    for e in events:
+        if e.get("kind") == "position_check":
+            d = _parse(e)
+            if d and d.get("deal_id") and d.get("r") is not None:
+                out[d["deal_id"]] = max(out.get(d["deal_id"], float("-inf")), float(d["r"]))
+    return out
+
+
+def giveback_flag(peak: float | None, r_now: float | None) -> str:
+    """A flag when a trade that was well in profit has handed back half or more of it."""
+    if peak is None or r_now is None or peak < GIVEBACK_FROM_R:
+        return ""
+    if r_now <= peak * (1 - GIVEBACK_SHARE):
+        return (f"GIVING BACK PROFIT: it reached +{peak:.2f}R at a check and is now {r_now:+.2f}R. Lock profit now: tighten so at least half of the "
+                f"best is kept, or take it, and say which in the review")
+    return ""
+
+
 def atr_by_epic(snapshots: dict[str, dict]) -> dict[str, float]:
     """ATR in points from the newest archived snapshot of each market (no price allowance used)."""
     return {s["epic"]: float(s["atr"]) for s in snapshots.values() if s.get("epic") and s.get("atr")}
