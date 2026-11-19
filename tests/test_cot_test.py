@@ -2,7 +2,7 @@ from ig_swing import cot_test as cot
 
 
 def test_signals_fire_on_fresh_extremes_only():
-    base = [(f"2000-01-{i:02d}", 0.0 + (i % 5) * 0.001) for i in range(1, 200)]
+    base = [(None, 0.01 * ((i * 37) % 101) / 101) for i in range(1, 200)]   # spread-out values, no ties
     series = [(f"d{i:04d}", v) for i, (_, v) in enumerate(base)]
     series[170] = ("d0170", 0.5)    # crowd very long -> short
     series[171] = ("d0171", 0.5)    # still extreme, not fresh
