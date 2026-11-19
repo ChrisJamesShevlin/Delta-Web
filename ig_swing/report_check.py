@@ -158,12 +158,17 @@ def build(ctx: dict, verdict: str, text: str, now: datetime) -> str:
                 f'<div class=k><div><span class=sub>Equity</span><b>£{eq:.2f}</b><span class=sub>{eq - START_EQUITY:+.2f} vs start</span></div>'
                 f'<div><span class=sub>Placed this check</span><b>{len(live)}</b><span class=sub>{len(ctx["cards"]) - len(live)} proposed only</span></div>'
                 f'<div><span class=sub>Ideas recorded</span><b>{len(ctx["ideas"])}</b><span class=sub>{ctx["total_ideas"]} in all</span></div></div>',
+                f'<div class=v>Open now: {len(ctx.get("open_now", []))} position{"s" if len(ctx.get("open_now", [])) != 1 else ""}'
+                + (": " + ", ".join(html.escape(x) for x in ctx.get("open_now", [])) if ctx.get("open_now") else "") + '</div>',
                 f'<h2>What we can use</h2>{ctx["capacity"]}']
     if ctx.get("reviews"):
         sections.append(f'<h2>Open positions: exit line and would I open it now</h2>{ctx["reviews"]}')
     if ctx.get("position_cards"):
         sections.append(f'<h2>Open positions: where each one is and what its stop keeps</h2><div class=sub>{LADDER_NOTE}</div>' + "".join(ctx["position_cards"]))
-    sections.append("<h2>Trades this check</h2>" + ("".join(c["html"] for c in ctx["cards"]) or '<div class=sub>No order was placed or proposed live this check.</div>'))
+    closed_note = (f'<div class=sub>Opened and closed again since the last check, not open now: {html.escape("; ".join(ctx["closed_in_window"]))}.</div>'
+                   if ctx.get("closed_in_window") else "")
+    sections.append("<h2>New trades this check (still open; their positions also appear above)</h2>" + closed_note
+                    + ("".join(c["html"] for c in ctx["cards"]) or '<div class=sub>No new trade was placed this check.</div>'))
     sections.append(f'<h2>How the whole book sits</h2>{ctx["exposure"]}')
     if ctx.get("equity_days") is not None:
         pts = [(d[5:], e) for d, e in ctx["equity_days"]] + [("now", eq)]
@@ -183,7 +188,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ig_swing.report_check", description=__doc__.splitlines()[0])
     ap.add_argument("--verdict", required=True)
     ap.add_argument("--text-file", required=True)
-    ap.add_argument("--since-hours", type=float, default=4.0, help="ideas recorded in this window belong to this check")
+    ap.add_argument("--since-hours", type=float, default=None,
+                    help="ideas recorded in this window belong to this check (default: since the previous market report, at most 12 hours, else 1 hour)")
     ap.add_argument("--no-open", action="store_true")
     args = ap.parse_args(argv)
 
@@ -207,7 +213,13 @@ def main(argv: list[str] | None = None) -> int:
     db = sqlite3.connect(str(ROOT / "data" / "journal.db"))
     ev_rows = [{"kind": k, "detail": d, "ts": ts, "id": i} for i, ts, k, d in db.execute("select id, ts, kind, detail from events order by id")]
     all_ideas = scored_ideas(ev_rows)
-    cutoff = (now - timedelta(hours=args.since_hours)).isoformat()
+    if args.since_hours is not None:
+        since = now - timedelta(hours=args.since_hours)
+    else:
+        prev = sorted((f.stat().st_mtime for f in (ROOT / "reports").glob("*_market.html")), reverse=True) if (ROOT / "reports").exists() else []
+        prev = [datetime.fromtimestamp(t, timezone.utc) for t in prev if now - datetime.fromtimestamp(t, timezone.utc) <= timedelta(hours=12)]
+        since = prev[0] if prev else now - timedelta(hours=1)
+    cutoff = since.isoformat()
     ideas = [i for i in all_ideas if (i.get("ts") or "") >= cutoff]
     live_links = {}
     for e in ev_rows:
@@ -217,10 +229,14 @@ def main(argv: list[str] | None = None) -> int:
     trades = {t["deal_id"]: t for t in journal.open_trades()}
     trades.update({t["deal_id"]: t for t in journal.closed_trades() if t.get("deal_id")})
     cards, new_risk = [], 0.0
+    closed_in_window: list[str] = []
     for i in ideas:
         deal = live_links.get(i.get("id"))
         trade = trades.get(deal) if deal else None
         if not (trade or i.get("live")):
+            continue
+        if trade and trade.get("closed_at"):
+            closed_in_window.append(f'{trade.get("market")} {trade.get("direction")} (closed, £{(trade.get("net_pnl") or 0):+.2f})')
             continue
         try:
             margin_pct = resolve_market(client, i["epic"] if i.get("epic") else i["market"])["margin"]
@@ -255,7 +271,11 @@ def main(argv: list[str] | None = None) -> int:
     learning = [("IG price allowance", allowance), ("Ideas recorded in all", f"{len(all_ideas)} (live: {sum(1 for i in all_ideas if i.get('live'))})"),
                 ("Closed live trades", f"{len(closed)}, mean {mean_r:+.2f}R" if closed else "none yet"),
                 ("Reading", "far too few finished results to judge any playbook or my stated probabilities; run `challenge review` for the comparison with the baseline")]
-    ctx = {"equity": equity, "cards": cards, "ideas": ideas, "total_ideas": len(all_ideas), "capacity": cap_html, "exposure": exposure_html(book_exposure(rows, equity)),
+    open_now = []
+    for p in positions:
+        nm = "Crude oil" if "crude" in p.instrument_name.lower() else p.instrument_name
+        open_now.append(f"{nm} {'short' if p.direction == 'SELL' else 'long'}")
+    ctx = {"open_now": open_now, "closed_in_window": closed_in_window, "equity": equity, "cards": cards, "ideas": ideas, "total_ideas": len(all_ideas), "capacity": cap_html, "exposure": exposure_html(book_exposure(rows, equity)),
            "backdrop": backdrop, "scan": scan, "events": upcoming, "learning": learning}
     from .report_html import reviews_section
     ctx["reviews"] = reviews_section(journal, positions, now)
