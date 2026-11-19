@@ -45,6 +45,7 @@ Consequences for strategy design: a strangle or condor is two or four separate b
 Other facts:
 - **Prices through the API.** IG quotes these options through the API, including VIX options, although it does not quote the VIX market itself. The VIX future can be backed out of the chain by put-call parity: on the Jan chain at strike 23, call mid 3.205 minus put mid 3.525 gives 22.68, which matches IG's figure.
 - **Settlement differs by series.** US 500 monthlies settle on the next morning's opening print (SET, last dealing the day before); end-of-month ones on the cash close; weeklies and VIX on their own rules. The code must read each series' terms.
+- **Share options:** the platform's options page lists shares (the user's screenshot: NVIDIA, AMD, Micron, Strategy, SpaceX, Tesla), but the API returned no option for 14 US and UK names searched by name and strike, so our tools cannot price, score or place them. Parked, not in phase 1: single-stock implied volatility carries a smaller premium than index implied volatility in the academic work (secondary, not verified), spreads are likely wider, and earnings gaps are the main risk for a seller. Revisit only if IG's API exposes them and the index test passes.
 - **Daily options** (IG: expire at that day's close, spreads "as low as one point") are not in scope for swing checks a few times a day, and were not found through the API.
 - **IG's option price history:** not checked; option epics expire, so history is short anyway.
 
