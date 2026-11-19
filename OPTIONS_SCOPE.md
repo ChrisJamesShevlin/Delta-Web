@@ -86,6 +86,48 @@ Every check records the option positions each strategy would hold, at IG's real 
 **Phase 3: live at the minimum stake, in a separate pot.**
 Its own risk profile, set with the user: a stress-loss limit instead of a stop (for example, a 20% one-day US 500 fall and VIX at 80 together must not cost more than X% of the pot), buy-and-sell rules from phase 1, and a dated changelog entry. Kept apart from the challenge so both are measured cleanly; the book view adds the options' exposure so a short put and an index short are seen together.
 
+## 5a. Phase 1 in detail: selling US 500 options (draft for the pre-registration, 2026-11-19)
+
+The question (the user's): with an account big enough, would short strangles or similar premium-selling structures on IG's US 500 options have made money after IG's costs, and how big would the account need to be to have survived every bad period?
+
+**Strategies, each with rules fixed now (seven, so seven variants are counted):**
+
+| | Structure | Entry | Management, fixed in advance |
+|---|---|---|---|
+| S1 | Short strangle | monthly series about 45 days out; sell the 16-delta put and the 16-delta call | close at 50% of the credit; close at 21 days left; otherwise hold to settlement. No rolling (the baseline) |
+| S2 | Short strangle with rolling (the user's idea) | as S1 | as S1, plus: when a short leg reaches 30 delta, roll the untested leg in to 16 delta at the current price (more credit) and roll the tested leg out to the next monthly at 16 delta, only if the roll is for a net credit; close everything when the loss reaches 3 times the credit taken in |
+| S3 | Iron condor | as S1, plus buy the 5-delta put and the 5-delta call | as S1 |
+| S4 | Put credit spread | sell the 25-delta put, buy the 10-delta put, about 45 days | as S1 |
+| S5 | Short put (put writing) | sell the 30-delta put, about 45 days | as S1; a check against the published Cboe PutWrite record |
+| S6 | Calendar | sell the at-the-money put about 14 days out (a weekly), buy the at-the-money put about 45 days out (a monthly), same strike | close both when the short leg has 1 day left, at +25% of the debit paid, or at -50% |
+| S7 | Diagonal (bullish) | buy the 70-delta call about 90 days out; sell the 30-delta call about 30 days out against it, re-sold each month | close all at -50% of the debit or when the long leg has 30 days left; this one carries the market's drift and is labelled directional |
+
+Entries start on a fixed day each month (the first trading day), one structure at a time per strategy, so results do not depend on picking good days.
+
+**Data (free):** Yahoo daily S&P 500 (`^GSPC`) and the Cboe volatility indices for the term structure: `^VIX9D` (9 days, from 2011), `^VIX` (30 days, from 1990), `^VIX3M` (3 months, from 2007), `^VIX6M` (6 months, from 2008). Main period 2008-01 to 2026-10, which includes 2008, the Feb 2018 volatility spike, 2020 and 2022. S1 to S5 are also run from 1990 using `^VIX` only, as a longer look.
+
+**Prices are estimates, not real quotes:**
+- Black-Scholes on the index level, with the implied volatility for each expiry interpolated from the volatility indices (S&P dividend yield and rates set to fixed values, stated before the run).
+- A fixed skew assumption, written down before the run: out-of-the-money puts priced at a higher volatility than at the money, calls lower, scaled with the level of the VIX. One sensitivity run with the skew half as steep and one twice as steep.
+- Weakest for S6 and S7, which depend on the term structure: their results are labelled "model-sensitive" and would need real data (or phase 2) before any decision.
+
+**Costs, IG's spread-bet terms:** half the spread on every leg opened and every leg closed, nothing on a leg held to settlement, two halves on each leg in a roll. The spread is modelled from IG's observed US 500 option quotes (19 Nov: 0.4 points on a 0.9 option, 1.6 on a 7, about 2.0 on a 37, about 2.5 on a 90 to 160 option); more quotes are collected before the run (these are market-detail calls, no price allowance). One sensitivity run at 1.5 times the spread. No funding charge (none shown on IG's option ticket; to confirm).
+
+**Account size:** every structure at £1 a point. Margin for each short leg assumed at 5% of the index × stake (an estimate from IG's listed margin factor), and **not** reduced for a bought wing until IG's ticket shows that it nets them (unknown). Reported per strategy: peak margin used, worst loss, the smallest account that would have survived the whole period at £1 a point without falling below the margin needed, and the yearly return on that account.
+
+**Measured, per strategy, against holding the US 500 and against cash:** net return a year, volatility, worst monthly drawdown and time to recover, return per unit of risk, worst single month, 2008, Feb 2018, Mar 2020 and 2022 on their own, share of months positive, share of rolling 3-year windows positive, and for S2 how often a roll later saved or deepened the loss.
+
+**Pass bars, proposed (the user sets them before the run):**
+1. Net positive over the main period after IG's costs, also at 1.5 times the spread.
+2. Worst drawdown no more than 50% of the account size worked out above.
+3. Better return per unit of risk than holding the US 500.
+4. Positive in at least two of the three rough periods (2008 to 2012, 2013 to 2019, 2020 on).
+A strategy has to pass all four to go to phase 2. No statistical significance is claimed (option selling returns are heavily skewed and about 19 years is a small sample); like the trend sleeve test, this is a consistency check.
+
+**Rules for what happens next:** run once. Nothing (deltas, days, profit targets, roll triggers, skew) is changed after seeing results; any variant is a new pre-registration with the variant count stated. Survivors go to phase 2 on IG's live quotes, where the estimated prices are checked against IG's real ones.
+
+**Two facts to get from IG before the run** (a screenshot of a deal ticket each, or a message to IG): the margin to sell one US 500 option at £1 a point, and whether IG reduces the margin when a bought option covers it (a spread or condor).
+
 ## 6. Build list (for phases 1 to 3)
 
 Option chain lookup (strike, expiry, call or put) and quotes, searched by strike as IG's search needs; each series' settlement terms read from IG; implied volatility, delta and parity-implied forward; the historical simulator for phase 1; a shadow options book (journal tables, scoring at checks and at settlement); the rolling command; the order code for options (each leg a separate spread bet, dealt in a set order with a check that every leg filled, no stop, defined-risk checks, sells allowed only within the agreed stress limit); reconcile at expiry; a section on the report page.
