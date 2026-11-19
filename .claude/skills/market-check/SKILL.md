@@ -1,6 +1,6 @@
 ---
 name: market-check
-description: Use when the user says "market check", "health check" (it now means the same full check), "check the markets", "any trades?", or reports a sudden drop or spike in a market and asks whether there is a trade. Scans the whole default list (stock indices, US shares, metals, energy and currencies) with the read-only IG briefing, including IG client sentiment, the calendar, news by market and earnings; gives a closer read on anything the user names, and can trade ANY market IG offers, not just the list. Records shadow ideas with honest win probabilities and 1/8 Kelly sizing for the £45 play-money challenge, picks at most one live candidate, manages every open position (cuts losers early, tightens stops, takes profit, reverses when the evidence flips) and places orders itself under the user's standing authorisation when every guardrail passes; otherwise stops and asks.
+description: Use when the user says "market check", "health check" (it now means the same full check), "check the markets", "any trades?", or reports a sudden drop or spike in a market and asks whether there is a trade. Scans the whole default list (stock indices, US shares, metals, energy and currencies) with the read-only IG briefing, including IG client sentiment, the calendar, news by market and earnings; gives a closer read on anything the user names, and can trade ANY market IG offers, not just the list. Records shadow ideas with honest win probabilities and 1/8 Kelly sizing for the £45 play-money challenge, places every idea that passes the guardrails live (no per-check limit, user 2026-11-19), manages every open position (cuts losers early, tightens stops, takes profit, reverses when the evidence flips) and places orders itself under the user's standing authorisation when every guardrail passes; otherwise stops and asks.
 ---
 
 # Market check (the £45 challenge)
@@ -27,7 +27,7 @@ The separate positions-only "health check" is gone: on 19 Nov it spotted natural
 4. **The full briefing** (`challenge brief`, section 1) and `quick` on US 500 and US Tech 100.
 5. **The near-the-edge list** (section 2b): every market beyond its 20-day range AND every market within 0.25 ATR of its 20-day high or low. Name each one in the reply; the ones near the edge are re-checked at the next check.
 6. **Research pass** (section 1b): at least three searches, PLUS one fixed search beyond the list every check (user go, 2026-11-19): a WebSearch for today's biggest movers (US and UK stocks, commodities, currencies, anything with a sharp move or big news). For each one that is not on the briefing list and looks like a trigger, run `challenge find` and `challenge quick` (any IG daily bet works); name the ones checked in the reply, with "none found" when there are none. `challenge movers` does NOT do this: it only ranks the same list against stored bars. If the search returns nothing dated today, say so.
-7. **Ideas** (section 3) for every trigger and anything seriously considered; at most one live order (section 4), with `--exit-line`.
+7. **Ideas** (section 3) for every trigger and anything seriously considered; every idea that passes section 4 is placed live, with `--exit-line` (no per-check limit, user 2026-11-19).
 8. **Journal notes** for every market looked at, the **report page** (`report_check`, section 5), then the **backup**.
 9. **The reply** in the order of section 5, with the IG allowance left and the points this check used.
 **The last check of the day** is any check after 20:00 UTC (or when the user says it is the last one): it also applies the daily-close exit lines (a close beyond the exit line closes the trade), and moves every trade in profit to a stop in profit with IG's trailing stop on, before the night. On a Friday it is the weekend check too.
@@ -123,11 +123,11 @@ For every idea you would seriously consider, record it with `python3 -m ig_swing
 
 - **Tag news-driven ideas (2026-11-16).** When a specific headline or release drove the idea (any playbook, but always for `news_thesis` and `event_reaction`), add `--news-headline "<the headline, at most 200 characters>" --news-time HH:MM` (UTC publication time from the feed or wire) and, if known, `--news-price <the market's price when it broke>`. The tool records how late I was and the move since the news, and `challenge report`/`review` split results by news age (under 30 minutes, 30 minutes to 2 hours, over 2 hours, none cited). Take the time from the source, never guess it; if it is unknown, leave the tag off rather than invent one. Recording only: no rule uses it, and nothing is judged on fewer than about 30 results per bucket.
 
-## 4. The live candidate (at most one per check): place it yourself
+## 4. Live orders (every idea that passes, no per-check limit): place them yourself
 The account exists to gather data (user, 2026-11-12), but a live trade needs a genuine, confident directional view: never a guess, never a coin flip, and never a win chance raised to pass Kelly. When you do have that view and every condition below holds, place it without holding back out of excess caution. With no view, record shadow ideas and do not trade. Never use `--ignore-kelly`.
 The user's standing instruction (2026-11-11, for the £45 challenge account only): place orders as part of this skill without asking each time. So do not wait for a yes. The guardrails in code still apply and are not negotiable.
 
-Place it only if ALL of these hold:
+Place each idea live if ALL of these hold (there is no limit on how many per check, removed by the user 2026-11-19):
 - Kelly is positive (never use `--ignore-kelly`), the dry run says the order is allowed, and the profile in its first line is `challenge`.
 - The stake fits (the dry run shows it), none is already open in that market (there is no cap on the number of open positions, removed 2026-11-13; total open risk 40% still applies). There is no daily cap on new trades (removed by the user on 2026-11-12); the loss, cooldown and floor limits still apply.
 - The market is tradeable and the spread on the dry run is no more than about three times its normal level from the briefing.
