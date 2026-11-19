@@ -1,5 +1,7 @@
 # Options on IG spread bets: scope (draft, 2026-11-19)
 
+**Result, 2026-11-19: the phase 1 test of seven US 500 option-selling strategies was run once and all seven failed the pre-registered bars (none beat holding the US 500 per unit of risk; all had drawdowns over 50%). See CLAUDE.md. Not taken to the shadow phase.**
+
 Purpose: decide, on evidence, whether options are ruled in or out, as an addition to the challenge, not instead of it. Nothing here is built or traded. Every live step needs the user's go.
 
 The user's position (2026-11-19): money we can afford to lose (the main investments sit in a self-managed ISA), more funds can be added for options, and risk or account size alone is not a reason to rule an idea out. Selling options, including short strangles managed by rolling, is in scope.

@@ -422,3 +422,21 @@ Salvageable ideas from the old `API_Trader/main.py` (read the logic, do not copy
 ## Pre-registration: selling US 500 options on IG spread-bet terms (written 2026-11-19, BEFORE any data was fetched or any result seen)
 
 The user asked (19 Nov) whether, with an account big enough, short strangles or similar premium-selling structures on IG's US 500 options would work, alongside the challenge, not instead of it. Scope in `OPTIONS_SCOPE.md`. The full rules are in the docstring of `ig_swing/options_test.py`, committed before the data was pulled: seven strategies (S1 short strangle, S2 strangle with the user's rolling, S3 iron condor, S4 put credit spread, S5 short put, S6 put calendar, S7 call diagonal), model prices (Black-76, the Cboe volatility term structure, the skew fitted to IG's own ticket), IG's spread-bet costs (half the spread per leg opened or closed, none at settlement, spread from IG's quotes), margin 5% of the index per short leg with no netting (confirmed on IG's ticket), £1 a point, main period 2008 to Oct 2026, a VIX-only look from 1990 (descriptive). Pass bars set by the user, all four needed: (1) profit at 1x and 1.5x the spread; (2) worst account drawdown no more than 50%; (3) better return per unit of risk than the US 500 with dividends; (4) profit in two of 2008-12, 2013-19, 2020-26. A pass that loses at half or double the skew is fragile; S6 and S7 are model-sensitive. Run once; survivors go to a forward shadow book on IG's live quotes. No significance claimed.
+
+### Result of the US 500 option-selling test (run once on 2026-11-19, nothing changed): ALL SEVEN FAIL. Not taken to the shadow phase.
+
+Main period 2008-01-02 to 2026-10-30, £1 a point, model prices, IG spread-bet costs. Benchmark US 500 with dividends: +11.3% a year, return per unit of risk 0.79, worst drawdown 52%.
+
+| | Strategy | £ a year | Account needed | Return a year on it | Risk ratio | Worst account drawdown | 2008 | Mar 2020 | 2022 | Bars 1/2/3/4 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| S1 | Short strangle | +53 | £776 | +6.8% | 0.50 | 79% | -30 | -237 | +157 | Y N N Y |
+| S2 | Strangle + rolling | +26 | £848 | +3.1% | 0.19 | 71% | -83 | -329 | +157 | Y N N N |
+| S3 | Iron condor | 0 | £968 | 0.0% | 0.00 | 53% | -44 | -126 | -24 | N N N N |
+| S4 | Put credit spread | +11 | £461 | +2.4% | 0.15 | 76% | -127 | -132 | -120 | N N N N |
+| S5 | Short put | +78 | £502 | +15.5% | 0.49 | 88% | -165 | -344 | -166 | Y N N Y |
+| S6 | Put calendar | -73 | £1,806 | -4.0% | -1.42 | 79% | -59 | +16 | -94 | N N N N |
+| S7 | Call diagonal | +83 | £450 | +18.4% | 0.37 | 92% | -293 | -147 | -621 | Y N N Y |
+
+Reading: every strategy fails bar 3 (none beats simply holding the US 500 per unit of risk) and bar 2 (worst drawdown over 50%). Bar 2 is measured on the smallest account that would have survived, which makes it harsh; bar 3 does not depend on the account size, and a descriptive post-hoc check with each month's profit scaled by the index level (to remove the fixed £1-a-point distortion while the index rose about five-fold) gives the same answer: best ratio 0.39 (S5) and 0.38 (S1) against 0.79. The short strangle and the short put earn money (about 1.4% and 2.1% of the index a year) but with index-scaled drawdowns of 19 to 21%; at 1.5x the spread S1 falls from £53 to £34 a year, so IG's spread takes roughly 40% of the strangle's gross premium. The user's rolling made the strangle worse (£26 against £53 a year; 10 rolls, the rolled cycle ended better than at the first roll 7 times, worse 3). Bought wings (S3, S4) cost more than they saved. The calendar lost in every period (model-sensitive). The diagonal is a leveraged long that lost £621 in 2022 (model-sensitive). The 1990 VIX-only look (descriptive) is weaker still: S1 +0.6% a year, S5 +5.0% with an 89% drawdown. Sensitivity: results barely move with half or double the skew, except S7.
+
+Limits: model prices, not IG's real historical quotes; daily closes only (intraday spikes and margin calls not seen, so the true worst case is worse); no margin netting; fixed £1 a point. Under the pre-registered rules no strategy goes to the shadow phase, and option selling on the US 500 as specified is ruled out. Seven variants have been tried; any new variant needs a new pre-registration.
