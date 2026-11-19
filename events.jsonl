@@ -475,3 +475,8 @@
 {"detail": "{\"deal_id\": \"DIAAAASJLMBG8BW\", \"r\": -0.033}", "id": 475, "kind": "position_check", "ts": "2026-11-19T19:27:01.652286+00:00"}
 {"detail": "{\"deal_id\": \"DIAAAASJLM6P5A5\", \"r\": 0.0}", "id": 476, "kind": "position_check", "ts": "2026-11-19T19:27:01.652286+00:00"}
 {"detail": "{\"deal_id\": \"DIAAAASJLNH3BA9\", \"r\": -0.007}", "id": 477, "kind": "position_check", "ts": "2026-11-19T19:27:01.652286+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASHKLVVMA6\", \"r\": 1.048}", "id": 478, "kind": "position_check", "ts": "2026-11-19T19:28:16.006961+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASJLMBG8BW\", \"r\": -0.071}", "id": 479, "kind": "position_check", "ts": "2026-11-19T19:28:16.006961+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASJLM6P5A5\", \"r\": -0.013}", "id": 480, "kind": "position_check", "ts": "2026-11-19T19:28:16.006961+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASHKLVVMA6\", \"r\": 1.067}", "id": 481, "kind": "position_check", "ts": "2026-11-19T19:30:47.278645+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASJLMBG8BW\", \"r\": -0.035}", "id": 482, "kind": "position_check", "ts": "2026-11-19T19:30:47.278645+00:00"}
