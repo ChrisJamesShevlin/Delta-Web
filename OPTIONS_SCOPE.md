@@ -126,7 +126,9 @@ A strategy has to pass all four to go to phase 2. No statistical significance is
 
 **Rules for what happens next:** run once. Nothing (deltas, days, profit targets, roll triggers, skew) is changed after seeing results; any variant is a new pre-registration with the variant count stated. Survivors go to phase 2 on IG's live quotes, where the estimated prices are checked against IG's real ones.
 
-**Two facts to get from IG before the run** (a screenshot of a deal ticket each, or a message to IG): the margin to sell one US 500 option at £1 a point, and whether IG reduces the margin when a bought option covers it (a spread or condor).
+**Confirmed from the user's ticket (19 Nov, Weekly US 500 (Mon) 7275 call, index 7247.5):** selling at £1 a point needs **£362.41 margin = 5% of the index × stake**, no premium added, which matches IG's FAQ ("size × underlying deposit factor"). Opening cost £0.56 = half the 1.12-point spread; the weekly's spread is 1.12 points at every strike on the screen (7000 to 7330). The ticket also shows IG's implied volatility by strike (4 days out: 29.6% at the 7000 put, 23.5% at the money, 21.6% at the 7330 call), which is used to set the skew assumption.
+
+**Still unknown:** whether IG reduces the margin when a bought option covers a sold one (spread or condor), and whether a strangle is margined on both legs or one. IG's pages do not say, and finding out needs either IG support or a real position. Until then the test assumes both short legs are margined in full with no offset, so a strangle or condor at £1 a point needs about £725 of margin.
 
 ## 6. Build list (for phases 1 to 3)
 
