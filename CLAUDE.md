@@ -463,3 +463,16 @@ Reading: the overlays give about the same return as holding the US 500 with a sm
 ## Pre-registration: the wheel on US Tech 100, Russell 2000, gold and crude (written 2026-11-19, BEFORE the run)
 
 Rules in the docstring of `ig_swing/options_test3.py`, committed before the run: test 2's wheel against holding the long, per market, 2008-07 to 2026-10, with each market's skew, option spread and future spread taken from IG's live quotes on 19 Nov (at-the-money volatility 0.90 x its volatility index: VXN, RVX, GVZ, OVX from FRED). Bars per market against its own long, both needed: higher return per unit of risk at 1x and 1.5x spreads, and a smaller worst cumulative fall. Fragile if a pass fails at half or double skew or at 0.85 x the volatility index. Gold and crude are data-limited (Yahoo's continuous front-month futures). Variants 11 to 14. Run once.
+
+### Result of the four-market wheel test (run once on 2026-11-19, nothing changed): Russell 2000 passes cleanly; crude passes only on paper; US Tech 100 and gold fail
+
+2008-07 to 2026-10, the wheel against holding the long in the same market, returns over cash on a position the size of the market.
+
+| Market | Long: return a year / risk ratio / worst fall | Wheel: return / ratio / worst fall | Verdict |
+|---|---|---|---|
+| US Tech 100 | 16.2% / 0.87 / 47.8% | 11.3% / 0.77 / 45.7% | FAIL (bar 1) |
+| US Russell 2000 | 9.6% / 0.46 / 58.4% | 9.4% / 0.53 / 52.4% | PASS, not fragile |
+| Gold | 9.4% / 0.54 / 48.3% | 5.7% / 0.42 / 43.6% | FAIL (bar 1), data-limited |
+| Crude oil | 6.7% / 0.16 / 122.0% | 7.2% / 0.17 / 122.0% | PASS on paper, data-limited |
+
+Russell 2000: the wheel's advantage holds at 1.5x spreads (0.50 vs 0.46), at half and double the skew and at 0.85 and 0.95 x the volatility index (+0.03 to +0.10), and in the longer look from 2004 (0.54 vs 0.43, worst fall 65% vs 73%). Crude's pass is degenerate: one put settled in the money in 2008 at a high strike, the calls were then never allowed below that cost basis, so the wheel held crude 99% of days and is in effect the long with small call premiums; it is not a usable result. US Tech 100: in its strong bull market the capped upside cost about 5 points a year. Gold: the wheel trailed holding by about 4 points a year. Calibrated to IG's quotes on one day, model prices, daily closes, no margin netting; 14 variants tried in all; no significance claimed.
