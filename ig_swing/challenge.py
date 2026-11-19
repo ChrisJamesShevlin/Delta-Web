@@ -63,7 +63,8 @@ ALL_MARKETS: dict[str, tuple[str, str, float]] = {
     "FTSE 100": ("IX.D.FTSE.DAILY.IP", "FT100", 5.0),
     "France 40": ("IX.D.CAC.DAILY.IP", "FR40", 5.0),
     "Japan 225": ("IX.D.NIKKEI.DAILY.IP", "JP225", 5.0),
-    # US shares (24 hour markets). Snapshot only in the briefing (no daily bars) to protect the price allowance; the quick read adds bars.
+    # US shares (24 hour markets). Since 2026-11-19 the briefing pulls IG daily bars for them as for every other market (about 30 points each
+    # once to fill the store, then about one a day), so ATR, the 20-day range and the price-setup scan cover the shares too.
     # The margin here is only a placeholder: the live margin is read from IG on every run. No sentiment id is known for shares.
     # Bond ETF bets (added 2026-11-17, user: scan them with a view to trading them later). London-listed ETFs offered as daily bets,
     # priced in pounds, margin 25%, spreads about 0.03%, no IG client sentiment, no Yahoo fallback symbol known. Read from IG's search on 2026-11-17.
@@ -369,7 +370,7 @@ def baseline_ideas_from_rows(rows: list[dict], now: datetime) -> list[dict[str, 
     a target of 3 ATR (2 to 1), 5 days. Markets without daily bars (the shares) are left out. Scored with the same machinery as my ideas."""
     out = []
     for r in rows:
-        if ASSET_CLASS.get(r["market"]) == "Bonds":      # scanned for context and hedging, not traded regularly: kept out of the daily benchmark
+        if ASSET_CLASS.get(r["market"]) in ("Bonds", "US shares"):   # bonds: context only; shares: kept out so the benchmark's market set is unchanged since 12 Nov
             continue
         if not (r.get("atr") and r.get("sma20") and r.get("bid") and r.get("offer")):
             continue
@@ -933,11 +934,7 @@ def build_rows(client: Any, equity: float, now: datetime, clean: Callable[[pd.Da
             price = (snap.bid + snap.offer) / 2
             margin = snap.margin or margin
             sma20, tech = None, None
-            if name in SHARES:
-                a, atr_pct, range_pos = None, None, None
-                stake, note = stake_hint(equity, BRIEFING_RISK_PCT, 0.03 * price, price, margin, snap.min_stake)
-                note = (note + " (stop assumed 3% away, no bars)").strip()
-            else:
+            if True:                 # shares included since 2026-11-19 (user go): IG daily bars for every market, so the range rules can fire on shares too
                 source = "ig"
                 try:
                     bars = clean(client.get_prices(epic, "DAY", 30), now)
@@ -1146,8 +1143,6 @@ def main(argv: list[str] | None = None) -> int:
                 if sn_ is None:
                     continue
                 quotes_[name_] = ((sn_.bid + sn_.offer) / 2, sn_.pct_change)
-                if name_ in SHARES:
-                    continue
                 try:
                     from .indicators import atr as _atr
                     rows_ = [r for r in client._cache.load_bars(f"{epic_}_DAY")]

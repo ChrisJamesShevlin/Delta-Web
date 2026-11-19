@@ -229,7 +229,7 @@ def test_build_rows_covers_only_the_markets_it_is_given():
     rows, notes = ch.build_rows(C(), 45.57, NOW, lambda df, now: df)
     assert [r["market"] for r in rows] == list(ch.MARKETS) and len(rows) == 34 and notes == []
     share = next(r for r in rows if r["market"] == "Apple")
-    assert share["atr"] is None and "no bars" in share["note"]                                   # shares are snapshot-only in the briefing
+    assert share["atr"] == 2.0 and share["range_pos"] is not None and share["tech"] is not None             # shares get IG daily bars since 2026-11-19
     two = {k: ch.MARKETS[k] for k in ("Gold", "US 500")}
     rows_two, _ = ch.build_rows(C(), 45.57, NOW, lambda df, now: df, two)
     assert [r["market"] for r in rows_two] == ["Gold", "US 500"]
