@@ -404,3 +404,6 @@
 {"detail": "{\"deal_id\": \"DIAAAASHKLVVMA6\", \"stop\": 4665.0, \"distance\": 148.1, \"step\": 29.62, \"why\": \"User instruction 19 Nov: trail from +0.5R; stop locked at 4665 (+0.25R), IG trails 146.5 points behind\"}", "id": 404, "kind": "trailing_set", "ts": "2026-11-19T13:39:40.627395+00:00"}
 {"detail": "{\"deal_id\": \"DIAAAASHBYDRMA3\", \"r\": 0.374}", "id": 405, "kind": "position_check", "ts": "2026-11-19T13:39:47.299773+00:00"}
 {"detail": "{\"deal_id\": \"DIAAAASHKLVVMA6\", \"r\": 0.78}", "id": 406, "kind": "position_check", "ts": "2026-11-19T13:39:47.299773+00:00"}
+{"detail": "{\"hours\": 3.0, \"positions\": {\"EUR/USD\": 40, \"Spot Silver\": 40}, \"watch\": 109}", "id": 407, "kind": "news_watch", "ts": "2026-11-19T13:41:44.937446+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASHBYDRMA3\", \"r\": 0.384}", "id": 408, "kind": "position_check", "ts": "2026-11-19T13:42:18.959738+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASHKLVVMA6\", \"r\": 0.757}", "id": 409, "kind": "position_check", "ts": "2026-11-19T13:42:18.959738+00:00"}
