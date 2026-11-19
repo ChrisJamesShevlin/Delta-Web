@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .report_html import AMBER, BLUE, CARD, CSS, FG, GREEN, MUTED, RED, ROOT, REPORTS, START_EQUITY, ladder_levels, ladder_svg, release_rows, text_sections
+from .report_html import AMBER, BLUE, CARD, CSS, FG, GREEN, MUTED, RED, ROOT, REPORTS, START_EQUITY, LADDER_NOTE, ladder_levels, ladder_svg, position_cards, release_rows, text_sections
 
 COST_R = 0.05          # assumed cost per trade in R, as in the Kelly sizing
 CROWDED = 70.0         # IG clients this long or short is crowded (the trend playbook's skip rule)
@@ -159,6 +159,8 @@ def build(ctx: dict, verdict: str, text: str, now: datetime) -> str:
                 f'<h2>What we can use</h2>{ctx["capacity"]}']
     if ctx.get("reviews"):
         sections.append(f'<h2>Open positions: exit line and would I open it now</h2>{ctx["reviews"]}')
+    if ctx.get("position_cards"):
+        sections.append(f'<h2>Open positions: where each one is and what its stop keeps</h2><div class=sub>{LADDER_NOTE}</div>' + "".join(ctx["position_cards"]))
     sections.append("<h2>Trades this check</h2>" + ("".join(c["html"] for c in ctx["cards"]) or '<div class=sub>No order was placed or proposed live this check.</div>'))
     sections.append(f'<h2>How the whole book sits</h2>{ctx["exposure"]}')
     rows = "".join(f'<tr><td>{html.escape(i["market"])}</td><td>{i["direction"]}</td><td>{i["confidence"]}</td><td class=n>{i["p_win"]:.0%}</td><td>{"live" if i.get("live") else "shadow"}</td>'
@@ -251,6 +253,13 @@ def main(argv: list[str] | None = None) -> int:
            "backdrop": backdrop, "scan": scan, "events": upcoming, "learning": learning}
     from .report_html import reviews_section
     ctx["reviews"] = reviews_section(journal, positions, now)
+    checks: dict = {}
+    for e in ev_rows:
+        if e["kind"] == "position_check":
+            d = json.loads(e["detail"])
+            if d.get("r") is not None:
+                checks.setdefault(d["deal_id"], []).append((datetime.fromisoformat(e["ts"]), d["r"]))
+    ctx["position_cards"] = position_cards(positions, {t["deal_id"]: t for t in journal.open_trades()}, checks, now)[0]
     page = build(ctx, args.verdict, Path(args.text_file).read_text(), now)
     REPORTS.mkdir(exist_ok=True)
     path = REPORTS / f"{now:%Y-%m-%d_%H%M}_market.html"

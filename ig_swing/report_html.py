@@ -39,20 +39,22 @@ def _x(r: float) -> float:
 
 def ladder_svg(lv: dict) -> str:
     stop, tp, now = lv["stop"], lv["target"], lv["now"]
-    s = [f'<svg viewBox="0 0 {LADDER_W} 74" width="100%">']
+    s = [f'<svg viewBox="0 0 {LADDER_W} 80" width="100%">']
     s.append(f'<rect x="{_x(X_MIN + .05):.0f}" y="30" width="{_x(stop) - _x(X_MIN + .05):.0f}" height="14" fill="{RED}" opacity=".25"/>')
     s.append(f'<rect x="{_x(stop):.0f}" y="30" width="{_x(tp if tp is not None else 2) - _x(stop):.0f}" height="14" fill="{GREEN}" opacity=".18"/>')
     s.append(f'<line x1="{_x(X_MIN + .05):.0f}" x2="{_x(X_MAX - .05):.0f}" y1="37" y2="37" stroke="{MUTED}"/>')
-    for rv, lab, col in [(-1, "original stop -1R", RED), (0, "entry", FG), (0.75, "+0.75R", AMBER), (1, "+1R trail", AMBER),
+    # the stop steps of 19 Nov: breakeven and IG's trailing stop at +0.5R, at least +0.25R locked from +0.75R (see manage.py)
+    for rv, lab, col in [(-1, "original stop -1R", RED), (0, "entry", FG), (0.5, "+0.5R: breakeven, IG trail on", AMBER), (0.75, "+0.75R: lock +0.25R", AMBER),
                          (tp, f"target +{tp:.1f}R" if tp is not None else "", GREEN)]:
         if rv is None:
             continue
-        dash = "3 3" if rv in (0.75, 1, -1) else "0"
+        dash = "3 3" if rv in (0.5, 0.75, -1) else "0"
         s.append(f'<line x1="{_x(rv):.0f}" x2="{_x(rv):.0f}" y1="26" y2="48" stroke="{col}" stroke-width="1.5" stroke-dasharray="{dash}"/>')
-        s.append(f'<text x="{_x(rv):.0f}" y="{62 if rv == 0.75 else 18}" fill="{col}" font-size="10" text-anchor="middle">{lab}</text>')
-    stop_lab = "stop (breakeven)" if abs(stop) < .02 else f"stop {stop:+.1f}R"
-    s.append(f'<rect x="{_x(stop) - 3:.0f}" y="24" width="6" height="26" fill="{RED}"/>'
-             f'<text x="{_x(stop):.0f}" y="62" fill="{RED}" font-size="10" text-anchor="middle">{stop_lab}</text>')
+        s.append(f'<text x="{_x(rv):.0f}" y="{72 if rv == 0.75 else 18}" fill="{col}" font-size="10" text-anchor="{"start" if rv in (0.5, 0.75) else "middle"}">{lab}</text>')
+    stop_lab = "stop (breakeven)" if abs(stop) < .02 else f"stop {stop:+.2f}R"
+    sc = GREEN if stop > 0.01 else AMBER if stop > -0.01 else RED      # green once the stop keeps a profit
+    s.append(f'<rect x="{_x(stop) - 3:.0f}" y="24" width="6" height="26" fill="{sc}"/>'
+             f'<text x="{_x(stop):.0f}" y="62" fill="{sc}" font-size="10" text-anchor="middle">{stop_lab}</text>')
     s.append(f'<circle cx="{_x(max(X_MIN, min(X_MAX, now))):.0f}" cy="37" r="8" fill="{GREEN if now >= 0 else RED}" stroke="#fff" stroke-width="2"/></svg>')
     return "".join(s)
 
@@ -106,10 +108,11 @@ CSS = (f"body{{background:#14181f;color:{FG};font:15px system-ui;max-width:700px
        f".k b{{display:block;font-size:20px}}p.w{{font-size:14px;line-height:1.55;margin:4px 0}}table{{border-collapse:collapse;width:100%;font-size:13px}}td,th{{border-bottom:1px solid #2b313c;padding:5px;text-align:left}}")
 
 
-def build(positions: list, trades: dict, equity: float, equity_days: list[tuple[str, float]], checks: dict, events: list,
-          verdict: str, text: str, now: datetime, reviews_html: str = "") -> str:
+def position_cards(positions: list, trades: dict, checks: dict, now: datetime) -> tuple[list[str], float, float]:
+    """One ladder card per open position, with the stop steps of 19 Nov. Returns (cards, open profit, what all stops together keep).
+    Shared by the health check and market check pages, so both always show the same stop logic."""
     from .manage import initial_risk_points, move_in_r
-    cards, tot_pl, tot_risk = [], 0.0, 0.0
+    cards, tot_pl, tot_kept = [], 0.0, 0.0
     for p in positions:
         rp = initial_risk_points(p, trades.get(p.deal_id))
         now_px = p.bid if p.direction == "SELL" else p.offer
@@ -119,25 +122,42 @@ def build(positions: list, trades: dict, equity: float, equity_days: list[tuple[
         lv = ladder_levels(p.direction, p.open_level, p.stop_level, p.limit_level, now_px, rp)
         m = move_in_r(p, rp) or 0.0
         pl = p.unrealised_pnl or 0.0
+        kept = lv["stop"] * rp * p.size
         tot_pl += pl
-        tot_risk += min(0.0, lv["stop"] * rp * p.size)
+        tot_kept += kept
         prev = [r for ts, r in checks.get(p.deal_id, []) if ts < now - timedelta(minutes=45)]
         dtxt = f' · <span style="color:{GREEN if m - prev[-1] >= 0 else RED}">{m - prev[-1]:+.2f}R since the last check</span>' if prev else ""
+        moved = m * rp
+        nxt = ("profit locked: the stop follows 0.75R behind the best" + (" and IG trails it" if p.trailing_distance else "") if lv["stop"] >= 0.249 else
+               f"{max(1.0, 0.5 * rp - moved):.0f} pts to +0.5R (stop to breakeven, IG trail on)" if m < 0.5 else
+               f"{max(1.0, 0.75 * rp - moved):.0f} pts to +0.75R (locks +0.25R)")
         facts = [f"{lv['from_entry_pts']:.0f} pts {'in profit' if m >= 0 else 'against us'}", f"{lv['to_stop_pts']:.0f} pts to stop",
-                 f"{lv['to_plus1r_pts']:.0f} pts to +1R" if m < 1 else "past +1R: trail it"]
+                 f"stop keeps £{kept:+.2f}" if kept > 0.005 else ("stop at breakeven" if kept > -0.005 else f"stop loses £{-kept:.2f}"),
+                 f"IG trailing {p.trailing_distance:g} pts behind" if p.trailing_distance else "no IG trailing stop", nxt]
         if lv["to_target_pts"] is not None:
             facts.append(f"{lv['to_target_pts']:.0f} pts to target")
         name = p.instrument_name.replace("Oil - US Crude", "US Crude")
         cards.append(f'<div class=card><div class=hd><b>{p.direction} {html.escape(name)}</b><span style="color:{GREEN if pl >= 0 else RED}">£{pl:+.2f} · {m:+.2f}R</span></div>'
                      f'{ladder_svg(lv)}<div class=sub>{" · ".join(facts)}{dtxt}</div></div>')
+    return cards, tot_pl, tot_kept
+
+
+LADDER_NOTE = ('Distance in R (1R = the risk taken at entry). The dot is now; right is profit. Stop steps: breakeven and IG trailing stop at +0.5R, '
+               'at least +0.25R locked from +0.75R, then 0.75R behind the best.')
+
+
+def build(positions: list, trades: dict, equity: float, equity_days: list[tuple[str, float]], checks: dict, events: list,
+          verdict: str, text: str, now: datetime, reviews_html: str = "") -> str:
+    cards, tot_pl, tot_kept = position_cards(positions, trades, checks, now)
+    tot_risk = min(0.0, tot_kept)
     eq_pts = [(d[5:], e) for d, e in equity_days] + [("now", equity)]
     return (f'<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Health check</title><style>{CSS}</style>'
             f'<h1>Health check</h1><div class=sub>{now:%a %d %b %H:%M} UTC</div><div class=v>{html.escape(verdict)}</div>'
             f'<div class=k><div><span class=sub>Equity</span><b>£{equity:.2f}</b><span class=sub>{equity - START_EQUITY:+.2f} vs £{START_EQUITY:.0f} start</span></div>'
             f'<div><span class=sub>Open profit</span><b style="color:{GREEN if tot_pl >= 0 else RED}">£{tot_pl:+.2f}</b><span class=sub>{len(positions)} positions</span></div>'
-            f'<div><span class=sub>Worst case, all stops hit</span><b style="color:{RED if tot_risk < 0 else GREEN}">£{tot_risk:+.2f}</b><span class=sub>{abs(tot_risk) / equity * 100:.0f}% of equity (limit 40%)</span></div></div>'
+            f'<div><span class=sub>If every stop is hit</span><b style="color:{RED if tot_kept < 0 else GREEN}">£{tot_kept:+.2f}</b><span class=sub>{"kept" if tot_kept >= 0 else f"{abs(tot_risk) / equity * 100:.0f}% of equity lost (limit 40%)"}</span></div></div>'
             + (f'<h2>Position reviews: exit line and would I open it now</h2>{reviews_html}' if reviews_html else '') +
-            f'<h2>Where each trade is</h2><div class=sub>Distance in R (1R = the risk taken at entry). The dot is now; right is profit. Red is loss, green is the way to target.</div>{"".join(cards)}'
+            f'<h2>Where each trade is</h2><div class=sub>{LADDER_NOTE}</div>{"".join(cards)}'
             f'<h2>Profit and loss against the £{START_EQUITY:.0f} start</h2><div class=sub>The £15 test deposit before 12 Nov is left out.</div>{equity_svg(eq_pts)}'
             f'<h2>Next 26 hours: high-impact releases</h2><table><tr><th>When</th><th>Release</th><th>Forecast</th><th>Affects</th></tr>{release_rows(events)}</table>'
             f'{text_sections(text)}<p class=sub>No edge is shown. Results this small are noise.</p>')
