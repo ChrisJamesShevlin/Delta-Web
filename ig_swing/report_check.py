@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .report_html import AMBER, BLUE, CARD, CSS, FG, GREEN, MUTED, RED, ROOT, REPORTS, START_EQUITY, LADDER_NOTE, ladder_levels, ladder_svg, position_cards, release_rows, text_sections
+from .report_html import AMBER, BLUE, CARD, CSS, FG, GREEN, MUTED, RED, ROOT, REPORTS, START_EQUITY, LADDER_NOTE, START_DAY, equity_svg, ladder_levels, ladder_svg, position_cards, release_rows, text_sections
 
 COST_R = 0.05          # assumed cost per trade in R, as in the Kelly sizing
 CROWDED = 70.0         # IG clients this long or short is crowded (the trend playbook's skip rule)
@@ -130,7 +130,7 @@ def capacity_html(equity: float, available: float | None, open_risk: float, new_
             ("Margin in use", f"£{equity - available:.2f}" if available is not None else "unknown"),
             ("Distance above the floor", f"£{equity - lim.min_equity_gbp:.2f} (floor £{lim.min_equity_gbp:.0f}, no new entries below it)"),
             ("Drawdown", dd), ("Day so far", f"{dod:+.2f}%  (halts new orders at -{lim.daily_loss_limit_pct:.0f}%)" if dod is not None else "unknown"),
-            ("Cooldown", cooldown), ("Per-trade ceiling", f"{lim.risk_per_trade_pct:.0f}% of equity, £{equity * lim.risk_per_trade_pct / 100:.2f}")]
+            ("Cooldown", cooldown), ("Per-trade ceiling", f"{lim.max_risk_per_trade_pct:.0f}% of equity, £{equity * lim.max_risk_per_trade_pct / 100:.2f} (live stake is the market minimum until calibrated)")]
     return bar + "<table>" + "".join(f"<tr><td>{a}</td><td>{html.escape(b)}</td></tr>" for a, b in rows) + "</table>"
 
 
@@ -163,11 +163,14 @@ def build(ctx: dict, verdict: str, text: str, now: datetime) -> str:
         sections.append(f'<h2>Open positions: where each one is and what its stop keeps</h2><div class=sub>{LADDER_NOTE}</div>' + "".join(ctx["position_cards"]))
     sections.append("<h2>Trades this check</h2>" + ("".join(c["html"] for c in ctx["cards"]) or '<div class=sub>No order was placed or proposed live this check.</div>'))
     sections.append(f'<h2>How the whole book sits</h2>{ctx["exposure"]}')
+    if ctx.get("equity_days") is not None:
+        pts = [(d[5:], e) for d, e in ctx["equity_days"]] + [("now", eq)]
+        sections.append(f'<h2>Profit and loss against the £{START_EQUITY:.0f} start</h2><div class=sub>The £15 test deposit before 12 Nov is left out.</div>{equity_svg(pts)}')
     rows = "".join(f'<tr><td>{html.escape(i["market"])}</td><td>{i["direction"]}</td><td>{i["confidence"]}</td><td class=n>{i["p_win"]:.0%}</td><td>{"live" if i.get("live") else "shadow"}</td>'
                    f'<td style="min-width:170px">{sentiment_cell((i.get("features") or {}).get("long_pct"), i["direction"])}</td></tr>' for i in ctx["ideas"])
     sections.append(f'<h2>The view and client sentiment</h2><div class=sub>{html.escape(ctx["backdrop"])}</div><table><tr><th>Market</th><th>Side</th><th>Confidence</th><th>Win chance</th><th>Book</th><th>IG clients</th></tr>{rows or "<tr><td colspan=6>No ideas recorded in this window.</td></tr>"}</table>')
     sections.append(f'<h2>Market scan: biggest moves today</h2><div class=sub>In daily ranges (ATR). The ones beyond their 20-day range are labelled.</div>{scan_html(ctx["scan"])}')
-    sections.append(f'<h2>Next 26 hours: high-impact releases</h2><table><tr><th>When</th><th>Release</th><th>Forecast</th><th>Affects</th></tr>{release_rows(ctx["events"])}</table>')
+    sections.append(f'<h2>Next 26 hours: high-impact releases</h2><table><tr><th>When</th><th>Release</th><th>Forecast</th><th>Affects</th></tr>{release_rows(ctx["events"], ctx.get("held", []))}</table>')
     sections.append(f'<h2>Learning and data</h2><table>{"".join(f"<tr><td>{a}</td><td>{html.escape(b)}</td></tr>" for a, b in ctx["learning"])}</table>')
     sections.append(text_sections(text))
     sections.append('<p class=sub>No edge is shown. Results this small are noise.</p>')
@@ -234,7 +237,8 @@ def main(argv: list[str] | None = None) -> int:
     cap_html = capacity_html(equity, acct.available, open_risk, new_risk, lim, journal.peak_equity(), dod, cooldown_text(journal.closed_trades(), lim, now))
     mb = [json.loads(d) for (d,) in db.execute("select detail from events where kind='macro_backdrop' order by id desc limit 1")]
     backdrop = "Backdrop (last recorded): " + ", ".join(f"{k} {v['level']:g} ({v['day_pct']:+.1f}% today, {v['five_day_pct']:+.1f}% in 5 days)" for k, v in mb[0].items()) if mb else "No macro backdrop recorded."
-    snap = db.execute("select market, day_pct, atr_pct, range_pos, long_pct from snapshots where day = (select max(day) from snapshots)").fetchall()
+    snap = db.execute("select s.market, s.day_pct, s.atr_pct, s.range_pos, s.long_pct from snapshots s join (select market, max(ts) mts from snapshots "
+                      "where day = (select max(day) from snapshots) group by market) m on s.market = m.market and s.ts = m.mts").fetchall()   # newest per market, no repeats
     scan = [{"market": m, "day_pct": d, "atr_pct": a, "range_pos": r, "long_pct": l} for m, d, a, r, l in snap]
     evs, _ = load_events(requests.Session(), now.date(), now.date() + timedelta(days=2), optional_key("FRED_API_KEY"), world=True)
     upcoming = [e for e in events_within(evs, now, 26) if e.time_utc]
@@ -259,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
             d = json.loads(e["detail"])
             if d.get("r") is not None:
                 checks.setdefault(d["deal_id"], []).append((datetime.fromisoformat(e["ts"]), d["r"]))
+    ctx["held"] = [(p.instrument_name, p.direction) for p in positions]
+    ctx["equity_days"] = [(d, e) for d, e in db.execute("select day, equity from equity_daily where day >= ? order by day", (START_DAY,))]
     ctx["position_cards"] = position_cards(positions, {t["deal_id"]: t for t in journal.open_trades()}, checks, now)[0]
     page = build(ctx, args.verdict, Path(args.text_file).read_text(), now)
     REPORTS.mkdir(exist_ok=True)

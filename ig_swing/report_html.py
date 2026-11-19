@@ -88,16 +88,27 @@ def text_sections(text: str) -> str:
     return "".join(out)
 
 
-AFFECTS = {"AUD": "AUD/USD short", "USD": "all four (dollar and yields)", "EUR": "EUR/USD short"}
+CURRENCY_MARKETS = {"USD": ("gold", "silver", "us 500", "us tech", "wall street", "russell", "treasury"), "GBP": ("ftse", "gilt"),
+                    "EUR": ("germany", "france", "dax", "cac"), "JPY": ("japan", "nikkei"), "AUD": (), "CAD": (), "NZD": (), "CHF": ()}
 
 
-def release_rows(events: list) -> str:
+def affected(label: str, held: list[tuple[str, str]]) -> str:
+    """Which open positions a release can move: currency pairs containing its currency, plus the markets linked to it."""
+    m = re.search(r"\((\w{3})\)", label)
+    cur = m.group(1) if m else ""
+    hits = []
+    for name, direction in held:
+        low = name.lower()
+        if (cur and cur in name.upper().replace(" ", "")) or any(k in low for k in CURRENCY_MARKETS.get(cur, ())) or \
+                (("crude" in label.lower() or "eia" in label.lower()) and ("oil" in low or "crude" in low)):
+            hits.append(f"{name} {direction.lower()}")
+    return ", ".join(hits)
+
+
+def release_rows(events: list, held: list[tuple[str, str]] | None = None) -> str:
     rows = []
     for ev in events:
-        m = re.search(r"\((\w{3})\)", ev.label)
-        aff = AFFECTS.get(m.group(1), "") if m else ""
-        if "Crude" in ev.label or "EIA" in ev.label:
-            aff = "US Crude"
+        aff = affected(ev.label, held or [])
         rows.append(f"<tr><td>{ev.time_utc:%a %H:%M} UTC</td><td>{html.escape(ev.label)}</td><td>{html.escape(ev.forecast or '')}</td><td>{html.escape(aff or 'none held')}</td></tr>")
     return "".join(rows) or "<tr><td colspan=4>No high-impact releases in the next 26 hours.</td></tr>"
 
@@ -159,7 +170,7 @@ def build(positions: list, trades: dict, equity: float, equity_days: list[tuple[
             + (f'<h2>Position reviews: exit line and would I open it now</h2>{reviews_html}' if reviews_html else '') +
             f'<h2>Where each trade is</h2><div class=sub>{LADDER_NOTE}</div>{"".join(cards)}'
             f'<h2>Profit and loss against the £{START_EQUITY:.0f} start</h2><div class=sub>The £15 test deposit before 12 Nov is left out.</div>{equity_svg(eq_pts)}'
-            f'<h2>Next 26 hours: high-impact releases</h2><table><tr><th>When</th><th>Release</th><th>Forecast</th><th>Affects</th></tr>{release_rows(events)}</table>'
+            f'<h2>Next 26 hours: high-impact releases</h2><table><tr><th>When</th><th>Release</th><th>Forecast</th><th>Affects</th></tr>{release_rows(events, [(p.instrument_name, p.direction) for p in positions])}</table>'
             f'{text_sections(text)}<p class=sub>No edge is shown. Results this small are noise.</p>')
 
 

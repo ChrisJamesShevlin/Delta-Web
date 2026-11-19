@@ -36,3 +36,12 @@ def test_position_cards_show_the_new_stop_steps():
     fresh = Position("D2", "E", "EUR/USD", "BUY", 0.01, 100.0, 90.0, 120.0, 102.0, 102.1, 1.0, None)
     c2 = position_cards([fresh], {"D2": {"risk_gbp": 0.1, "size": 0.01}}, {}, now)[0][0]
     assert "3 pts to +0.5R" in c2 and "no IG trailing stop" in c2
+
+
+def test_release_affects_only_what_is_held():
+    from ig_swing.report_html import affected
+    held = [("Spot Silver", "SELL"), ("EUR/USD", "SELL")]
+    assert affected("Initial Jobless Claims (USD)", held) == "Spot Silver sell, EUR/USD sell"
+    assert affected("ECB President Lagarde Speech (EUR)", held) == "EUR/USD sell"
+    assert affected("Retail Sales MoM (GBP)", held) == ""
+    assert affected("EIA Crude Oil Stocks Change (USD)", [("Oil - US Crude", "SELL")]) == "Oil - US Crude sell"
