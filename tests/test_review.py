@@ -112,3 +112,19 @@ def test_trailing_flag():
     assert not trailing_flag(0.6, 148.0)
     assert not trailing_flag(0.4, None)
     assert not trailing_flag(None, None)
+
+
+def test_news_watch_reads_back_pasted_stories_and_notes():
+    import json as _json
+    from datetime import datetime, timedelta, timezone
+    from ig_swing import newswatch as nw
+    now = datetime(2026, 11, 20, 9, 0, tzinfo=timezone.utc)
+    ev = lambda h, d: {"kind": "check_note", "ts": (now - timedelta(hours=h)).isoformat(), "detail": _json.dumps(d)}
+    events = [ev(1, {"market": "Europe / Germany 40", "saw": "Reuters (pasted by the user): DAX -1.3%", "decision": "watch"}),
+              ev(2, {"market": "Spot Gold", "saw": "gold at a new low", "decision": "hold", "pasted": False}),
+              ev(60, {"market": "Spot Gold", "saw": "too old", "decision": "x"})]
+    notes = nw.recent_notes(events, now)
+    assert [n["pasted"] for n in notes] == [True, False]
+    assert nw.notes_for("Spot Gold", notes)[0]["saw"] == "gold at a new low"
+    text = nw.render([], [], 3, [], notes)
+    assert "Stories the user pasted in" in text and "DAX -1.3%" in text and "too old" not in text

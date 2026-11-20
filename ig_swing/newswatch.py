@@ -68,8 +68,52 @@ def market_watch(headlines: list, now: datetime, hours: float) -> list[tuple[Any
     return out
 
 
-def render(positions: list[dict], watch: list, hours: float, notes: list[str]) -> str:
+NOTE_HOURS = 48
+
+
+def recent_notes(events: list[dict], now: datetime, hours: float = NOTE_HOURS) -> list[dict]:
+    """Journal notes from the last ``hours``, newest first: stories the user pasted in and what each check saw and decided.
+    Added 2026-11-20 (user go): pasted stories used to be written once and never read back."""
+    out = []
+    for e in events:
+        if e.get("kind") != "check_note":
+            continue
+        ts = _ts(e.get("ts"))
+        if ts is None or ts < now - timedelta(hours=hours):
+            continue
+        try:
+            d = json.loads(e.get("detail") or "{}")
+        except ValueError:
+            continue
+        saw = d.get("saw", "")
+        out.append({"ts": ts, "market": d.get("market", ""), "saw": saw, "decision": d.get("decision", ""),
+                    "pasted": bool(d.get("pasted")) or "pasted by the user" in saw.lower()})
+    return sorted(out, key=lambda n: n["ts"], reverse=True)
+
+
+def notes_for(market: str, notes: list[dict]) -> list[dict]:
+    """Notes that concern a held market: named in the note's market field or by the market's own keywords in the text."""
+    key = keyword_market(market)
+    low = market.lower()
+    return [n for n in notes if key in markets_named(f"{n['market']} {n['saw']}") or low in n["market"].lower() or key.lower() in n["market"].lower()]
+
+
+def render(positions: list[dict], watch: list, hours: float, notes: list[str], journal_notes: list[dict] | None = None) -> str:
     lines = ["NEWS WATCH (free headline feeds, titles only; read the story behind anything that matters)"]
+    journal_notes = journal_notes or []
+    pasted = [n for n in journal_notes if n["pasted"]]
+    lines.append(f"\nStories the user pasted in, last {NOTE_HOURS} hours ({len(pasted)}): read them again, they count until they stop being true")
+    for n in pasted:
+        lines.append(f"  {n['ts']:%a %H:%M} [{n['market']}] {n['saw']}")
+        lines.append(f"      decided then: {n['decision']}")
+    if not pasted:
+        lines.append("  none")
+    mine = [n for n in journal_notes if not n["pasted"]]
+    lines.append(f"\nMy notes from earlier checks, last {NOTE_HOURS} hours ({len(mine)}, newest 20):")
+    for n in mine[:20]:
+        lines.append(f"  {n['ts']:%a %H:%M} [{n['market']}] {n['saw'][:160]} -> {n['decision'][:120]}")
+    if not mine:
+        lines.append("  none")
     if not positions:
         lines.append("No open positions.")
     for p in positions:
@@ -80,6 +124,8 @@ def render(positions: list[dict], watch: list, hours: float, notes: list[str]) -
             lines.append(f"  {'NEW ' if is_new else '    '}{h.published:%a %H:%M} {h.title[:150]} - {h.source}")
         if not p["news"]:
             lines.append("  none found in the feeds: search the web for the risk named at entry before saying there is no news")
+        for n in notes_for(p["market"], journal_notes)[:6]:
+            lines.append(f"  {'PASTED ' if n['pasted'] else 'NOTE   '}{n['ts']:%a %H:%M} [{n['market']}] {n['saw'][:200]}")
     lines.append(f"\nAcross all markets, last {hours:g} hours (headlines that name a market; possible trades or risks to what we hold):")
     for h, names in watch[:40]:
         lines.append(f"  {h.published:%H:%M} [{', '.join(names[:3])}] {h.title[:140]} - {h.source}")
@@ -117,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         positions.append({"market": t["market"], "direction": t["direction"], "opened": opened,
                           "news": position_news(t["market"], opened, heads, now, _ts(rv["ts"]) if rv else None)})
     watch = market_watch(heads, now, args.hours)
-    print(render(positions, watch, args.hours, notes))
+    print(render(positions, watch, args.hours, notes, recent_notes(journal.events(), now)))
     journal.record_event(now.isoformat(), "news_watch", json.dumps({"hours": args.hours, "positions": {p["market"]: len(p["news"]) for p in positions},
                                                                   "watch": len(watch)}))
     return 0

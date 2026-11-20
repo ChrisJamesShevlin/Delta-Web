@@ -266,9 +266,12 @@ def apply_limit(client: Any, journal: Any, pos: Position, new_limit: float, now:
     return {"deal_id": pos.deal_id, "from": pos.limit_level, "to": new_limit}
 
 
-def record_note(journal: Any, now: datetime, market: str, saw: str, decision: str) -> dict[str, str]:
-    """One line per market looked at: what was seen and what was decided (including 'no action'). Journal only, places nothing."""
-    detail = {"market": market, "saw": saw.strip()[:400], "decision": decision.strip()[:200]}
+def record_note(journal: Any, now: datetime, market: str, saw: str, decision: str, pasted: bool = False) -> dict[str, Any]:
+    """One line per market looked at: what was seen and what was decided (including 'no action'). Journal only, places nothing.
+    ``pasted`` marks a story the user pasted in (kept longer, and shown again by every news watch for 48 hours)."""
+    detail = {"market": market, "saw": saw.strip()[:1500 if pasted else 400], "decision": decision.strip()[:200]}
+    if pasted:
+        detail["pasted"] = True
     journal.record_event(now.isoformat(), "check_note", json.dumps(detail))
     return detail
 
@@ -299,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     nt.add_argument("--market", required=True)
     nt.add_argument("--saw", required=True)
     nt.add_argument("--decision", required=True)
+    nt.add_argument("--pasted", action="store_true", help="the user pasted this story in; the news watch shows it again for 48 hours")
     rc = sub.add_parser("reconcile", help="record trades IG closed on its own (stop or take-profit) in the journal; changes the journal only, places nothing")
     rc.add_argument("--execute", action="store_true")
     tr = sub.add_parser("trailing", help="switch a winning position (up 0.5R or more) to an IG trailing stop")
@@ -339,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
             print(format_history(journal.closed_trades()))
             return 0
         if args.cmd == "note":
-            d = record_note(journal, now, args.market, args.saw, args.decision)
+            d = record_note(journal, now, args.market, args.saw, args.decision, pasted=args.pasted)
             print(f"NOTE RECORDED: {d['market']}: {d['decision']}")
             return 0
         env = ig_env()
