@@ -116,3 +116,11 @@ def test_the_levels_appear_in_the_formatted_read():
     t["swing"] = {"support": [(120.0, 3)], "resistance": []}
     text = techread.format_tech(t)
     assert "swing support 120.0 (3x)" in text and "swing resistance none found" in text
+
+
+def test_long_read_moves_the_latest_close_by_todays_live_change():
+    series = bars([100.0] * 250)
+    flat = techread.long_read(series)
+    live = techread.long_read(series, -2.0)
+    assert abs(flat["d50_pct"]) < 1e-9
+    assert abs(live["d50_pct"] - (-2.0)) < 1e-9

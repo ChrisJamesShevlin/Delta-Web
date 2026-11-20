@@ -729,9 +729,9 @@ def format_quick(name: str, snap: dict, atr_pts: float, hourly: pd.DataFrame | N
              f"spread {snap['spread_pct']:.3f}%"]
     if abs(move_atr) >= 2:
         lines.append("  The move is over two daily ranges: unusual. Check for news before fading or following it.")
-    if hourly is not None and len(hourly):
-        hi, lo, last = float(hourly["high"].max()), float(hourly["low"].min()), float(hourly["close"].iloc[-1])
-        lines.append(f"  last {len(hourly)} hours: high {hi:.1f}, low {lo:.1f}, now {last:.1f} ({(last - hi) / hi * 100:+.2f}% from the high, {(last - lo) / lo * 100:+.2f}% from the low)")
+    hi, lo = snap.get("day_high"), snap.get("day_low")
+    if hi and lo:
+        lines.append(f"  today so far (IG live quote): high {hi:.1f}, low {lo:.1f}, now {price:.1f} ({(price - hi) / hi * 100:+.2f}% from the high, {(price - lo) / lo * 100:+.2f}% from the low)")
     if range20:
         lines.append(f"  20-day range {range20[0]:.1f} to {range20[1]:.1f}; price is "
                      + ("below the range (breakdown)" if price < range20[0] else "above the range (breakout)" if price > range20[1] else
@@ -756,6 +756,8 @@ def batch_snapshots(client: Any, epics: list[str]) -> dict[str, Any]:
             rules = m.get("dealingRules", {})
             mf = i.get("marginFactor")
             out[i["epic"]] = SimpleNamespace(bid=float(s["bid"]), offer=float(s["offer"]), pct_change=s.get("percentageChange"), net_change=s.get("netChange"),
+                                             day_high=float(s["high"]) if s.get("high") is not None else None,
+                                             day_low=float(s["low"]) if s.get("low") is not None else None,
                                              status=s.get("marketStatus"), name=i.get("name"), sent_id=i.get("marketId"),
                                              margin=float(mf) if mf not in (None, "") else None,
                                              min_stake=float((rules.get("minDealSize") or {}).get("value") or 0.01),
@@ -841,6 +843,7 @@ def resolve_market(client: Any, query: str) -> dict[str, Any]:
     mid = (snap.bid + snap.offer) / 2
     return {"name": snap.name or q, "epic": epic, "sent_id": snap.sent_id or "", "margin": snap.margin or 20.0, "min_stake": snap.min_stake,
             "bid": snap.bid, "offer": snap.offer, "status": snap.status, "pct_change": snap.pct_change, "net_change": snap.net_change,
+            "day_high": getattr(snap, "day_high", None), "day_low": getattr(snap, "day_low", None),
             "spread_pct": (snap.offer - snap.bid) / mid * 100}
 
 
@@ -868,7 +871,7 @@ def enrich_with_yahoo(session: Any, rows: list[dict], today: Any) -> int:
         yb = load_daily(session, sym, today)
         if yb is None:
             continue
-        lr = long_read(yb)
+        lr = long_read(yb, r.get("day_pct"))   # include today's live move (Yahoo bars stop at yesterday)
         scaled = scale_to(yb, r["price"])
         if r.get("tech") is None:                      # a share: build the whole read from Yahoo bars rescaled to IG's price
             r["tech"] = tech_read(scaled.tail(40).reset_index(drop=True), r["price"]) if scaled is not None else None
@@ -889,7 +892,7 @@ def enrich_with_yahoo(session: Any, rows: list[dict], today: Any) -> int:
 def tech_for_market(session: Any, info: dict[str, Any], price: float, ig_bars: pd.DataFrame | None, today: Any) -> dict[str, Any] | None:
     """The technical read for one named market: IG's own bars first, then the longer Yahoo view merged in (and a full read for a share)."""
     key = {v[0]: k for k, v in ALL_MARKETS.items()}.get(info["epic"], info["name"])
-    row = {"market": key, "epic": info["epic"], "price": price, "tech": tech_read(ig_bars, price) if ig_bars is not None else None}
+    row = {"market": key, "epic": info["epic"], "price": price, "day_pct": info.get("pct_change"), "tech": tech_read(ig_bars, price) if ig_bars is not None else None}
     try:
         enrich_with_yahoo(session, [row], today)
     except Exception:
@@ -1282,13 +1285,10 @@ def main(argv: list[str] | None = None) -> int:
                     raise
                 bars = bars.tail(40).reset_index(drop=True)
                 bar_note = f"  note: IG's price allowance is short, so the ATR, range and technical read use {YAHOO_BARS_NOTE}"
-            try:
-                hourly = client.get_prices(epic, "HOUR", 24, essential=True) if not bar_note else None
-            except Exception:
-                hourly = None
+            hourly = None   # 2026-11-20: the day's high and low now come from the live quote; cached hourly bars could be 20 hours old
             long_pct = batch_sentiment(client, [sent_id]).get(sent_id) if sent_id else None
             quick_info = {"price": (info["bid"] + info["offer"]) / 2, "pct_change": info["pct_change"] or 0.0, "net_change": info["net_change"] or 0.0,
-                          "spread_pct": info["spread_pct"]}
+                          "spread_pct": info["spread_pct"], "day_high": info.get("day_high"), "day_low": info.get("day_low")}
             print(fit_line(info, equity))
             print(format_quick(info["name"], quick_info, float(atr(bars, 14).iloc[-1]), hourly, long_pct,
                                (float(bars["low"].tail(20).min()), float(bars["high"].tail(20).max())), len(client.get_positions())))

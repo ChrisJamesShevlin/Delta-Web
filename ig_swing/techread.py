@@ -47,13 +47,14 @@ def format_tech(t: dict[str, Any] | None) -> str:
             f"prior day {t['prev_low']:.1f} to {t['prev_high']:.1f}, last 5 days {t['week_low']:.1f} to {t['week_high']:.1f}" + format_long(t) + format_levels(t))
 
 
-def long_read(bars: pd.DataFrame) -> dict[str, Any] | None:
-    """Distance of the latest close from the 50 and 200 day averages, in percent, from a longer series. None if under 60 bars (the 200 day
-    figure is None under 200 bars)."""
+def long_read(bars: pd.DataFrame, live_change_pct: float | None = None) -> dict[str, Any] | None:
+    """Distance of the latest price from the 50 and 200 day averages, in percent, from a longer series of complete daily bars. With
+    ``live_change_pct`` (today's move from IG's live quote) the latest close is moved by today's change, so the distance is as of now.
+    None if under 60 bars (the 200 day figure is None under 200 bars)."""
     if bars is None or len(bars) < 60:
         return None
     close = bars["close"].astype(float)
-    last = float(close.iloc[-1])
+    last = float(close.iloc[-1]) * (1 + (live_change_pct or 0.0) / 100)
     sma50 = float(close.tail(50).mean())
     sma200 = float(close.tail(200).mean()) if len(close) >= 200 else None
     d50 = (last / sma50 - 1) * 100

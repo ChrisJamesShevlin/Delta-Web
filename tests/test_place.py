@@ -124,9 +124,9 @@ def test_build_account_records_equity_and_reads_the_peak(tmp_path):
 
 def test_quick_read_describes_the_move_in_daily_ranges():
     hourly = pd.DataFrame({"high": [11200.0, 11150.0, 11100.0], "low": [11150.0, 11080.0, 11040.0], "close": [11160.0, 11090.0, 11050.0]})
-    info = {"price": 11050.0, "pct_change": -1.5, "net_change": -170.0, "spread_pct": 0.008}
+    info = {"price": 11050.0, "pct_change": -1.5, "net_change": -170.0, "spread_pct": 0.008, "day_high": 11200.0, "day_low": 11040.0}
     text = ch.format_quick("EUR/USD", info, 70.0, hourly, 65.0, (11100.0, 11400.0), 0)
-    for needle in ("EUR/USD: 11050.0", "-1.50%", "-2.4 x", "over two daily ranges", "last 3 hours", "below the range (breakdown)", "65% long", "open positions: 0"):
+    for needle in ("EUR/USD: 11050.0", "-1.50%", "-2.4 x", "over two daily ranges", "today so far (IG live quote): high 11200.0, low 11040.0, now 11050.0", "below the range (breakdown)", "65% long", "open positions: 0"):
         assert needle in text
     calm = ch.format_quick("EUR/USD", {**info, "net_change": -20.0, "pct_change": -0.2}, 70.0, None, None, (11000.0, 11200.0), 1)
     assert "over two daily ranges" not in calm and "n/a" in calm and "% of the way up" in calm
