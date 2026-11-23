@@ -762,3 +762,25 @@
 {"detail": "{\"market\": \"EUR/JPY\", \"saw\": \"Below 20-day low at 17:21 UTC, downtrend, euro weak\", \"decision\": \"Placed trend short at minimum stake\"}", "id": 762, "kind": "check_note", "ts": "2026-11-23T17:23:01.172297+00:00"}
 {"detail": "{\"market\": \"Crude oil\", \"saw\": \"Bounced back to the old 20-day low (8074), Brent still 0.2 ATR below\", \"decision\": \"Hold: exit rule is a close back inside the range; stop unchanged\"}", "id": 763, "kind": "check_note", "ts": "2026-11-23T17:23:01.656425+00:00"}
 {"detail": "{\"market\": \"EUR/USD\", \"saw\": \"+0.58R\", \"decision\": \"Stop to breakeven 10934.8 and IG trailing at 44.7 points\"}", "id": 764, "kind": "check_note", "ts": "2026-11-23T17:23:02.139255+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASJ8UWNUBM\", \"r\": 0.578}", "id": 765, "kind": "position_check", "ts": "2026-11-23T18:33:47.790787+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASJ8U9BZBX\", \"r\": 0.401}", "id": 766, "kind": "position_check", "ts": "2026-11-23T18:33:47.790787+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASJ8VCNGA3\", \"r\": 0.173}", "id": 767, "kind": "position_check", "ts": "2026-11-23T18:33:47.790787+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASKAARMNBL\", \"r\": -0.165}", "id": 768, "kind": "position_check", "ts": "2026-11-23T18:33:47.790787+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASKAAWTNAJ\", \"r\": -0.195}", "id": 769, "kind": "position_check", "ts": "2026-11-23T18:33:47.790787+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASKABEMVBZ\", \"r\": 0.079}", "id": 770, "kind": "position_check", "ts": "2026-11-23T18:33:47.790787+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASKAZJ5ABZ\", \"r\": 0.068}", "id": 771, "kind": "position_check", "ts": "2026-11-23T18:33:47.790787+00:00"}
+{"detail": "{\"US 10-year yield\": {\"level\": 4.942, \"day\": 0.029999820709228686, \"five_day\": -0.1789998130798338, \"day_pct\": 0.6107455133187667, \"five_day_pct\": -3.495407530042094}, \"Dollar index\": {\"level\": 104.468, \"day\": 0.6580024414062535, \"five_day\": 0.917996948242191, \"day_pct\": 0.6338526701485048, \"five_day_pct\": 0.8865252739619356}, \"VIX\": {\"level\": 26.44, \"day\": -9.449999389648436, \"five_day\": 3.530000152587892, \"day_pct\": -26.330452912668623, \"five_day_pct\": 15.408119494102213}}", "id": 772, "kind": "macro_backdrop", "ts": "2026-11-23T18:33:55.852635+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASJ8UWNUBM\", \"r\": 0.581}", "id": 773, "kind": "position_check", "ts": "2026-11-23T18:34:18.475279+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASJ8U9BZBX\", \"r\": 0.402}", "id": 774, "kind": "position_check", "ts": "2026-11-23T18:34:18.475279+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASJ8VCNGA3\", \"r\": 0.177}", "id": 775, "kind": "position_check", "ts": "2026-11-23T18:34:18.475279+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASKAAWTNAJ\", \"r\": -0.197}", "id": 776, "kind": "position_check", "ts": "2026-11-23T18:34:18.475279+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASKABEMVBZ\", \"r\": 0.085}", "id": 777, "kind": "position_check", "ts": "2026-11-23T18:34:18.475279+00:00"}
+{"detail": "{\"deal_id\": \"DIAAAASKAZJ5ABZ\", \"r\": 0.066}", "id": 778, "kind": "position_check", "ts": "2026-11-23T18:34:18.475279+00:00"}
+{"detail": "{\"market\": \"Crude oil\", \"saw\": \"Back above 8074, inside the range, breakdown failed\", \"decision\": \"Closed at about -0.17R (thesis invalidated)\"}", "id": 779, "kind": "check_note", "ts": "2026-11-23T18:34:19.670066+00:00"}
+{"detail": "{\"market\": \"Brent crude\", \"saw\": \"Still 0.1 ATR below its old low 8830.7, bounced with crude\", \"decision\": \"Hold; cut if it closes back above 8830.7\"}", "id": 780, "kind": "check_note", "ts": "2026-11-23T18:34:20.034789+00:00"}
+{"detail": "{\"market\": \"EUR/USD\", \"saw\": \"+0.58R, trailing at breakeven\", \"decision\": \"No change\"}", "id": 781, "kind": "check_note", "ts": "2026-11-23T18:34:20.397914+00:00"}
+{"detail": "{\"market\": \"GBP/USD\", \"saw\": \"+0.40R\", \"decision\": \"Hold, below +0.5R trigger\"}", "id": 782, "kind": "check_note", "ts": "2026-11-23T18:34:20.762208+00:00"}
+{"detail": "{\"market\": \"NZD/USD\", \"saw\": \"+0.17R\", \"decision\": \"Hold\"}", "id": 783, "kind": "check_note", "ts": "2026-11-23T18:34:21.121569+00:00"}
+{"detail": "{\"market\": \"USD/CAD\", \"saw\": \"+0.08R, still above old high\", \"decision\": \"Hold\"}", "id": 784, "kind": "check_note", "ts": "2026-11-23T18:34:21.537903+00:00"}
+{"detail": "{\"market\": \"EUR/JPY\", \"saw\": \"+0.07R, below old low\", \"decision\": \"Hold\"}", "id": 785, "kind": "check_note", "ts": "2026-11-23T18:34:21.900910+00:00"}
+{"detail": "{\"market\": \"US 500\", \"saw\": \"+4.7%, 41% of range\", \"decision\": \"No action: no breakout\"}", "id": 786, "kind": "check_note", "ts": "2026-11-23T18:34:22.270073+00:00"}
